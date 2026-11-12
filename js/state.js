@@ -1,5 +1,5 @@
 // 상태 모델, 데모 데이터, 상태 변경 연산(대화형 수정의 공통 언어)
-import { DAY_NAMES, dateOfDay, toMin } from './scheduler.js';
+import { DAY_NAMES, dateOfDay, toMin, localDateKey } from './scheduler.js';
 
 export const PALETTE = ['#4f7cff', '#ff8a3d', '#22b07d', '#c25cf2', '#e5484d', '#0fa3b1', '#d4a017', '#6b7a99'];
 
@@ -7,7 +7,7 @@ let idSeq = Date.now() % 100000;
 export const newId = prefix => `${prefix}${(++idSeq).toString(36)}`;
 
 export function defaultPrefs() {
-  return { studyStart: '09:00', studyEnd: '23:00', dailyMax: 4, blockMin: 90 };
+  return { studyStart: '09:00', studyEnd: '23:00', dailyMax: 4, blockMin: 90, commuteMin: 50, commuteMode: '지하철' };
 }
 
 export function localISO(d) {
@@ -53,11 +53,12 @@ export function demoState(now = new Date()) {
       { id: 't5', title: '영어 발표 스크립트', course: '영어회화', due: rel(6, '10:00'), hours: 2 },
     ],
     prefs: defaultPrefs(),
+    condition: null,
   };
 }
 
 export function emptyState() {
-  return { courses: {}, classes: [], events: [], blocked: [], tasks: [], prefs: defaultPrefs() };
+  return { courses: {}, classes: [], events: [], blocked: [], tasks: [], prefs: defaultPrefs(), condition: null };
 }
 
 export function colorFor(state, course) {
@@ -143,6 +144,30 @@ export function applyOp(state, op) {
       if (!parts.length) throw new Error('바꿀 설정이 없어요.');
       return `설정 변경: ${parts.join(', ')}`;
     }
+    case 'set_condition': {
+      // 헬스케어 융합: 오늘의 수면·스트레스 (웨어러블 또는 직접 입력)
+      const c = { ...(state.condition && state.condition.date === localDateKey(op.now || new Date()) ? state.condition : {}) };
+      c.date = localDateKey(op.now || new Date());
+      const parts = [];
+      if (op.sleep_hours != null) { c.sleep = Math.min(12, Math.max(0, Number(op.sleep_hours))); parts.push(`수면 ${c.sleep}시간`); }
+      if (op.stress != null) { c.stress = Math.min(5, Math.max(1, Math.round(op.stress))); parts.push(`스트레스 ${c.stress}/5`); }
+      if (!parts.length) throw new Error('수면 시간이나 스트레스 중 하나는 필요해요.');
+      c.source = op.source || 'chat';
+      state.condition = c;
+      return `오늘 컨디션 기록: ${parts.join(', ')}`;
+    }
+    case 'set_commute': {
+      // 모빌리티 융합: 통학 시간과 수단
+      const p = state.prefs;
+      const parts = [];
+      if (op.minutes != null) { p.commuteMin = Math.min(180, Math.max(0, Math.round(op.minutes / 5) * 5)); parts.push(p.commuteMin ? `편도 ${p.commuteMin}분` : '통학 없음'); }
+      if (op.mode) {
+        if (!['지하철', '버스', '자차', '도보'].includes(op.mode)) throw new Error('수단은 지하철·버스·자차·도보 중 하나예요.');
+        p.commuteMode = op.mode; parts.push(op.mode);
+      }
+      if (!parts.length) throw new Error('바꿀 통학 정보가 없어요.');
+      return `통학 설정: ${parts.join(', ')}${p.commuteMode === '자차' ? ' (운전 중엔 학습 블록을 넣지 않아요)' : ''}`;
+    }
     default:
       throw new Error(`알 수 없는 연산: ${op.type}`);
   }
@@ -164,5 +189,6 @@ export function summarizeForLLM(state, weekStart, now) {
     blocked: state.blocked,
     tasks: state.tasks.map(({ id, title, course, due, hours, goalDay, done }) => ({ id, title, course, due, hours, goalDay, done })),
     prefs: state.prefs,
+    condition_today: state.condition && state.condition.date === localDateKey(now) ? state.condition : null,
   });
 }

@@ -14,6 +14,11 @@ export function toHHMM(min) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+export function localDateKey(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 export function weekStartOf(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -46,23 +51,74 @@ function subtract(intervals, s, e) {
   return out;
 }
 
+// ---------- 헬스케어 융합: 컨디션 계수 ----------
+// 수면·스트레스(웨어러블 또는 직접 입력)로 '오늘' 공부량과 블록 길이를 조절한다.
+export function conditionEffect(cond) {
+  if (!cond) return { factor: 1, blockCap: null, breakMin: 10, label: '기록 없음 · 평소대로' };
+  const sleep = cond.sleep ?? 7;
+  const stress = cond.stress ?? 2;
+  let factor = 1;
+  if (sleep < 5) factor = 0.5;
+  else if (sleep < 6.5) factor = 0.75;
+  else if (sleep >= 7.5 && stress <= 2) factor = 1.15;
+  if (stress >= 4) factor *= 0.75;
+  factor = Math.round(factor * 100) / 100;
+  const tired = factor < 0.8;
+  const label = tired ? '피로 · 공부량 줄이고 짧게' : factor > 1 ? '컨디션 좋음 · 조금 더' : '보통 · 평소대로';
+  return { factor, blockCap: tired ? 60 : null, breakMin: tired ? 20 : 10, label };
+}
+
+// ---------- 모빌리티 융합: 이동 중 학습이 가능한 과제 ----------
+export const MOBILE_RE = /퀴즈|암기|단어|복습|스크립트|발표|읽기|리딩|요약|개념|정리/;
+export const isMobileTask = t => t.mobile ?? MOBILE_RE.test(t.title);
+
 /**
- * state: { classes, events, blocked, tasks, prefs }
+ * state: { classes, events, blocked, tasks, prefs, condition }
  * opts: { weekStart: Date, now: Date }
- * returns { plan: [{id, taskId, day, start, end}], warnings: [string] }
+ * returns { plan, commutes, warnings, today: { capMin, effect } }
  */
 export function schedule(state, { weekStart, now }) {
   const p = state.prefs;
   const studyStart = toMin(p.studyStart);
   const studyEnd = toMin(p.studyEnd);
-  const blockLen = p.blockMin;
   const minBlock = 30;
-  const breakMin = 10;
-  const dailyCap = p.dailyMax * 60;
+  const nowPos = deadlinePos(weekStart, now);
+  const today = nowPos.day;
 
-  // 1) 요일별 빈 시간 계산
+  // 오늘 컨디션 반영 (기록 날짜가 오늘일 때만)
+  const todayKey = localDateKey(now);
+  const cond = state.condition && state.condition.date === todayKey ? state.condition : null;
+  const effect = conditionEffect(cond);
+  const capOf = d => {
+    const base = p.dailyMax * 60;
+    return d === today ? Math.round((base * effect.factor) / 30) * 30 : base;
+  };
+  const blockOf = d => (d === today && effect.blockCap ? Math.min(p.blockMin, effect.blockCap) : p.blockMin);
+  const breakOf = d => (d === today ? effect.breakMin : 10);
+
+  // 통학 구간: 수업이 있는 날, 첫 수업 전·마지막 수업 후
+  const commuteMin = Number(p.commuteMin) || 0;
+  const commutes = [];
+  if (commuteMin > 0) {
+    for (let d = 0; d < 7; d++) {
+      const cs = state.classes.filter(c => c.day === d).sort((a, b) => toMin(a.start) - toMin(b.start));
+      if (!cs.length) continue;
+      const first = toMin(cs[0].start);
+      const last = Math.max(...cs.map(c => toMin(c.end)));
+      commutes.push({ day: d, start: toHHMM(Math.max(0, first - 10 - commuteMin)), end: toHHMM(first - 10), dir: '등교' });
+      commutes.push({ day: d, start: toHHMM(last + 10), end: toHHMM(Math.min(24 * 60, last + 10 + commuteMin)), dir: '하교' });
+    }
+  }
+
+  // 1) 요일별 빈 시간(책상 공부용)과 이동 시간(이동 중 학습용)
   const free = [];
+  const moving = [];
   const used = new Array(7).fill(0);
+  const pastCut = (iv, d) => {
+    if (today > d) return [];
+    if (today === d) return subtract(iv, 0, Math.ceil(nowPos.minute / 30) * 30);
+    return iv;
+  };
   for (let d = 0; d < 7; d++) {
     let iv = [[studyStart, studyEnd]];
     const busy = [
@@ -71,16 +127,16 @@ export function schedule(state, { weekStart, now }) {
       ...state.blocked.filter(b => b.day === d),
     ];
     for (const b of busy) iv = subtract(iv, toMin(b.start) - 10, toMin(b.end) + 10);
-    // 이미 지난 시간 제외
-    const dayDate = dateOfDay(weekStart, d);
-    const nowPos = deadlinePos(weekStart, now);
-    if (nowPos.day > d) iv = [];
-    else if (nowPos.day === d) {
-      const cut = Math.ceil(nowPos.minute / 30) * 30;
-      iv = subtract(iv, 0, cut);
+    for (const c of commutes.filter(x => x.day === d)) iv = subtract(iv, toMin(c.start), toMin(c.end));
+    free.push(pastCut(iv, d).filter(([a, b]) => b - a >= minBlock));
+
+    // 이동 중 학습: 대중교통일 때만, 비워둔 시간과 겹치지 않는 통학 구간
+    let mv = [];
+    if (p.commuteMode !== '자차') {
+      for (const c of commutes.filter(x => x.day === d)) mv.push([toMin(c.start), toMin(c.end)]);
+      for (const b of state.blocked.filter(x => x.day === d)) mv = subtract(mv, toMin(b.start), toMin(b.end));
     }
-    void dayDate;
-    free.push(iv.filter(([a, b]) => b - a >= minBlock));
+    moving.push(pastCut(mv, d).filter(([a, b]) => b - a >= 20));
   }
 
   // 2) 과제를 실질 마감(목표일과 실제 마감 중 이른 것) 순으로 정렬
@@ -101,13 +157,29 @@ export function schedule(state, { weekStart, now }) {
   const warnings = [];
   let seq = 0;
 
-  for (const { t, eff, due } of tasks) {
+  for (const { t, eff } of tasks) {
     let remaining = Math.round(t.hours * 60);
     if (eff.day < 0) { warnings.push(`'${t.title}' 마감이 이미 지났어요.`); continue; }
-    const perDay = new Array(7).fill(0);
     const lastDay = Math.min(6, eff.day);
 
-    // 두 바퀴: 첫 바퀴는 하루 2블록까지(분산), 둘째 바퀴는 제한 없이 남은 시간 채우기
+    // 2-a) 이동 중에 할 수 있는 과제는 통학 시간부터 채운다(공부량 상한에 넣지 않음)
+    if (isMobileTask(t)) {
+      for (let d = 0; d <= lastDay && remaining > 0; d++) {
+        const limitEnd = d === eff.day ? eff.minute : 24 * 60;
+        for (let i = 0; i < moving[d].length && remaining > 0; i++) {
+          const [a, b] = moving[d][i];
+          const len = Math.floor(Math.min(b, limitEnd, a + remaining) / 10) * 10 - a;
+          if (len < 20) continue;
+          plan.push({ id: `b${++seq}`, taskId: t.id, day: d, start: toHHMM(a), end: toHHMM(a + len), mobile: true });
+          remaining -= len;
+          moving[d][i] = [a + len, b];
+        }
+        moving[d] = moving[d].filter(([a, b]) => b - a >= 20);
+      }
+    }
+
+    // 2-b) 책상 공부: 첫 바퀴는 하루 2블록까지(분산), 둘째 바퀴는 남은 시간 채우기
+    const perDay = new Array(7).fill(0);
     for (const maxPerDay of [2, 99]) {
       for (let d = 0; d <= lastDay && remaining > 0; d++) {
         const limitEnd = d === eff.day ? eff.minute : 24 * 60;
@@ -115,15 +187,15 @@ export function schedule(state, { weekStart, now }) {
         while (remaining > 0 && i < free[d].length && perDay[d] < maxPerDay) {
           const [a, b] = free[d][i];
           const end = Math.min(b, limitEnd);
-          const room = Math.min(end - a, dailyCap - used[d]);
-          let len = Math.min(blockLen, remaining, room);
+          const room = Math.min(end - a, capOf(d) - used[d]);
+          let len = Math.min(blockOf(d), remaining, room);
           if (len < remaining) len = Math.floor(len / 30) * 30;
           if (len <= 0 || len < Math.min(minBlock, remaining)) { i++; continue; }
-          plan.push({ id: `b${++seq}`, taskId: t.id, day: d, start: toHMM(a), end: toHMM(a + len) });
+          plan.push({ id: `b${++seq}`, taskId: t.id, day: d, start: toHHMM(a), end: toHHMM(a + len) });
           remaining -= len;
           used[d] += len;
           perDay[d]++;
-          const na = a + len + breakMin;
+          const na = a + len + breakOf(d);
           if (b - na >= minBlock) free[d][i] = [na, b];
           else free[d].splice(i, 1);
         }
@@ -138,10 +210,8 @@ export function schedule(state, { weekStart, now }) {
   }
 
   plan.sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start));
-  return { plan, warnings };
+  return { plan, commutes, warnings, today: { day: today, capMin: today >= 0 && today <= 6 ? capOf(today) : null, effect, recorded: !!cond } };
 }
-
-function toHMM(m) { return toHHMM(m); }
 
 // 두 계획의 차이를 사람이 읽을 수 있게
 export function diffPlans(oldPlan, newPlan, tasks) {

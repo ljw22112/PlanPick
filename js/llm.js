@@ -43,6 +43,16 @@ export const TOOLS = [
     description: '공부 선호를 바꾼다: 하루 최대 공부시간, 공부 가능 시작/끝 시각, 한 블록 길이(분).',
     input_schema: { type: 'object', properties: { daily_max_hours: { type: 'number' }, study_start: timeProp, study_end: timeProp, block_minutes: { type: 'integer' } } },
   },
+  {
+    name: 'set_condition',
+    description: '[헬스케어 융합] 오늘의 수면 시간과 스트레스(1~5)를 기록한다. 피로하면 스케줄러가 오늘 공부량을 줄이고 블록을 짧게, 컨디션이 좋으면 조금 늘린다. "피곤해"는 stress 4, "밤샜어"는 sleep_hours 2 정도로 해석.',
+    input_schema: { type: 'object', properties: { sleep_hours: { type: 'number' }, stress: { type: 'integer', minimum: 1, maximum: 5 } } },
+  },
+  {
+    name: 'set_commute',
+    description: '[모빌리티 융합] 편도 통학 시간(분)과 수단(지하철·버스·자차·도보)을 바꾼다. 대중교통이면 통학 시간에 퀴즈·암기·복습처럼 가벼운 과제를 "이동 중 학습"으로 배치하고, 자차면 넣지 않는다.',
+    input_schema: { type: 'object', properties: { minutes: { type: 'integer', minimum: 0 }, mode: { type: 'string', enum: ['지하철', '버스', '자차', '도보'] } } },
+  },
 ];
 
 function systemPrompt(state, weekStart, now) {
@@ -53,6 +63,7 @@ function systemPrompt(state, weekStart, now) {
 - 시간 표현: '2시'처럼 오전/오후가 없고 1~7시면 오후로 본다. '저녁'은 18–22시, '밤'은 21–24시, '오전'은 9–12시, '오후'는 13–18시.
 - 과제는 이름·과목으로 tasks에서 찾아 id를 쓴다. 애매하면 도구를 부르지 말고 짧게 되묻는다.
 - 필요한 만큼 여러 도구를 한 번에 호출해도 된다.
+- 피곤·수면 부족·스트레스 이야기는 set_condition, 통학 시간·수단 이야기는 set_commute로 반영한다.
 - 도구를 다 부른 뒤 무엇을 바꿨는지 한두 문장 반말이 아닌 친근한 존댓말로 요약한다. 일정과 무관한 질문엔 짧게 답한다.
 현재 상태(JSON):
 ${summarizeForLLM(state, weekStart, now)}`;

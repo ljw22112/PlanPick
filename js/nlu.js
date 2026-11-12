@@ -103,6 +103,30 @@ export function parseKorean(text, state, today) {
   if (/아침형|일찍 공부/.test(t)) ops.push({ type: 'set_preferences', study_start: '07:00', study_end: '21:00' });
   if (/밤에 공부|야행성|올빼미/.test(t)) ops.push({ type: 'set_preferences', study_start: '12:00', study_end: '24:00' });
 
+  // 헬스케어 융합: 컨디션
+  const slept = t.match(/(\d+(?:\.\d+)?)\s*시간\s*(?:밖에|만|정도|쯤)?\s*(?:못\s*)?잤/);
+  const cond = {};
+  if (slept) cond.sleep_hours = Number(slept[1]);
+  if (/밤샜|밤새|한숨도 못/.test(t)) cond.sleep_hours = 2;
+  if (/푹 ?잤|컨디션 ?(좋|최고|굿)/.test(t)) { cond.sleep_hours = cond.sleep_hours ?? 8; cond.stress = 1; }
+  if (/피곤|지쳤|힘들|컨디션 ?(안 ?좋|별로|나빠|최악)|아파/.test(t)) cond.stress = 4;
+  if (/스트레스 ?(심|많|폭발|최고)|멘붕/.test(t)) cond.stress = 5;
+  if (Object.keys(cond).length) ops.push({ type: 'set_condition', ...cond });
+
+  // 모빌리티 융합: 통학
+  if (/통학|등교|하교|출퇴근|통근/.test(t)) {
+    const op = { type: 'set_commute' };
+    const mins = t.match(/(\d+)\s*시간\s*(\d+)\s*분|(\d+(?:\.\d+)?)\s*(분|시간)/);
+    if (mins) op.minutes = mins[1] ? Number(mins[1]) * 60 + Number(mins[2]) : Number(mins[3]) * (mins[4] === '시간' ? 60 : 1);
+    if (/자차|운전|차로|차 ?끌/.test(t)) op.mode = '자차';
+    else if (/버스/.test(t)) op.mode = '버스';
+    else if (/지하철|전철/.test(t)) op.mode = '지하철';
+    else if (/걸어|도보|자취/.test(t)) op.mode = '도보';
+    if (/통학 ?(안|없)/.test(t)) op.minutes = 0;
+    if (op.minutes != null || op.mode) return { ops: [...ops, op] };
+  }
+  if (ops.some(o => o.type === 'set_condition')) return { ops };
+
   // 과제 관련
   if (task) {
     if (/끝|마무리|완성|해치우|미리/.test(t) && days.length) {

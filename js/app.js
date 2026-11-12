@@ -1,12 +1,12 @@
-import { schedule, diffPlans, DAY_NAMES, weekStartOf, dateOfDay, toMin } from './scheduler.js';
-import { demoState, emptyState, applyOp, clone, colorFor, localISO, newId } from './state.js';
+import { schedule, diffPlans, DAY_NAMES, weekStartOf, dateOfDay, toMin, isMobileTask, localDateKey } from './scheduler.js';
+import { demoState, emptyState, applyOp, clone, colorFor, localISO, newId, defaultPrefs } from './state.js';
 import { parseKorean } from './nlu.js';
 import { runLLM, readTimetableImage } from './llm.js';
 import { parseICS, SAMPLE_ICS } from './ics.js';
 
 const START_H = 7;
 const END_H = 24;
-const STORE = 'planpick:v1';
+const STORE = 'planpick:v2';
 const DEFAULT_MODEL = 'claude-haiku-5-5';
 
 const $ = s => document.querySelector(s);
@@ -29,9 +29,12 @@ function load() {
 }
 const app = load();
 let state = app.state;
+state.prefs = { ...defaultPrefs(), ...state.prefs };
 let plan = [];
+let commutes = [];
+let todayInfo = null;
 let warnings = [];
-let preview = null; // { draft, plan, warnings, diff }
+let preview = null; // { draft, plan, commutes, today, warnings, diff }
 const undoStack = [];
 const history = []; // LLM 대화 기록 (텍스트만)
 
@@ -60,6 +63,8 @@ const taskOf = (s, id) => s.tasks.find(t => t.id === id);
 function recompute() {
   const r = schedule(state, { weekStart, now });
   plan = r.plan;
+  commutes = r.commutes;
+  todayInfo = r.today;
   warnings = r.warnings;
   render();
   save();
@@ -89,6 +94,24 @@ function render() {
   renderLists();
   renderStats();
   renderMode();
+  renderCondition();
+}
+
+function renderCondition() {
+  const s = preview ? preview.draft : state;
+  const info = preview ? preview.today : todayInfo;
+  const c = s.condition && s.condition.date === localDateKey(now) ? s.condition : null;
+  const sl = $('#condSleep');
+  const st = $('#condStress');
+  if (document.activeElement !== sl) sl.value = c && c.sleep != null ? c.sleep : 7;
+  if (document.activeElement !== st) st.value = c && c.stress != null ? c.stress : 2;
+  $('#condSleepVal').textContent = `${c && c.sleep != null ? c.sleep : sl.value}h`;
+  const src = c ? (c.source === 'wearable' ? '웨어러블(모의)' : c.source === 'chat' ? '대화' : '직접 입력') : '';
+  const cap = info && info.capMin != null ? `오늘 최대 ${(info.capMin / 60).toFixed(1).replace(/\.0$/, '')}시간` : '';
+  const blk = info && info.effect.blockCap ? ` · 블록 ${info.effect.blockCap}분 · 휴식 ${info.effect.breakMin}분` : '';
+  $('#condEffect').innerHTML = `<b>${esc(info ? info.effect.label : '')}</b> ${cap}${blk}${src ? ` <span class="src">${src}</span>` : ''}`;
+  $('#condBar').classList.toggle('tired', !!(info && info.effect.factor < 0.8));
+  $('#condBar').classList.toggle('good', !!(info && info.effect.factor > 1));
 }
 
 function renderWeek() {
@@ -107,8 +130,10 @@ function renderStats() {
   const s = preview ? preview.draft : state;
   const p = preview ? preview.plan : plan;
   const mins = p.reduce((a, b) => a + toMin(b.end) - toMin(b.start), 0);
+  const mob = p.filter(b => b.mobile).reduce((a, b) => a + toMin(b.end) - toMin(b.start), 0);
   const open = s.tasks.filter(t => !t.done).length;
-  $('#stats').innerHTML = `<span>이번 주 공부 <b>${(mins / 60).toFixed(1).replace(/\.0$/, '')}시간</b></span><span>공부 블록 <b>${p.length}개</b></span><span>남은 과제 <b>${open}개</b></span>`;
+  const h = m => (m / 60).toFixed(1).replace(/\.0$/, '');
+  $('#stats').innerHTML = `<span>이번 주 공부 <b>${h(mins)}시간</b></span><span>이동 중 학습 <b>${h(mob)}시간</b></span><span>남은 과제 <b>${open}개</b></span>`;
   const w = preview ? preview.warnings : warnings;
   $('#warnings').innerHTML = w.map(x => `<div>${esc(x)}</div>`).join('');
 }
@@ -122,6 +147,7 @@ function pos(start, end) {
 function renderCalendar() {
   const s = preview ? preview.draft : state;
   const p = preview ? preview.plan : plan;
+  const cm = preview ? preview.commutes : commutes;
   const newKeys = preview ? new Set(p.filter(b => !plan.some(o => o.taskId === b.taskId && o.day === b.day && o.start === b.start && o.end === b.end)).map(b => b.id)) : new Set();
   const ghosts = preview ? plan.filter(o => !p.some(b => o.taskId === b.taskId && o.day === b.day && o.start === b.start && o.end === b.end)) : [];
 
@@ -141,6 +167,9 @@ function renderCalendar() {
     for (const b of s.blocked.filter(x => x.day === d && vis(x))) {
       html += `<div class="ev blocked" style="${pos(b.start < '07:00' ? '07:00' : b.start, b.end)}" title="${esc(b.reason)}"><span class="tt">${esc(b.reason)}</span></div>`;
     }
+    for (const c of cm.filter(x => x.day === d && vis(x))) {
+      html += `<div class="ev commute" style="${pos(c.start < '07:00' ? '07:00' : c.start, c.end)}" title="${c.dir} · ${esc(s.prefs.commuteMode)} ${s.prefs.commuteMin}분"><span class="tm">${c.dir} · ${esc(s.prefs.commuteMode)}</span></div>`;
+    }
     for (const c of s.classes.filter(x => x.day === d && vis(x))) {
       html += `<div class="ev class" style="${pos(c.start, c.end)};border-left:3px solid ${colorFor(s, c.title)}"><span class="tt">${esc(c.title)}</span><span class="tm">${c.start}–${c.end}</span></div>`;
     }
@@ -153,7 +182,9 @@ function renderCalendar() {
     }
     for (const b of p.filter(x => x.day === d)) {
       const t = taskOf(s, b.taskId) || {};
-      html += `<div class="ev study ${newKeys.has(b.id) ? 'new' : ''}" data-task="${t.id}" style="${pos(b.start, b.end)};background:${colorFor(s, t.course)}" title="${esc(t.title)} · 마감 ${fmtDue(t.due)}"><span class="tt">${esc(t.title)}</span><span class="tm">${b.start}–${b.end}</span></div>`;
+      const mob = b.mobile ? ' mobile' : '';
+      const style = b.mobile ? `border-color:${colorFor(s, t.course)};color:${colorFor(s, t.course)}` : `background:${colorFor(s, t.course)}`;
+      html += `<div class="ev study${mob} ${newKeys.has(b.id) ? 'new' : ''}" data-task="${t.id}" style="${pos(b.start, b.end)};${style}" title="${b.mobile ? '이동 중 학습 · ' : ''}${esc(t.title)} · 마감 ${fmtDue(t.due)}"><span class="tt">${b.mobile ? '이동 중 · ' : ''}${esc(t.title)}</span><span class="tm">${b.start}–${b.end}</span></div>`;
     }
     if (d === today) {
       const m = now.getHours() * 60 + now.getMinutes();
@@ -178,7 +209,8 @@ function renderLists() {
   $('#taskList').innerHTML = tasks.length ? tasks.map(t => {
     const placed = plan.filter(b => b.taskId === t.id).reduce((a, b) => a + toMin(b.end) - toMin(b.start), 0) / 60;
     const goal = t.goalDay != null ? ` · <span class="goal">${DAY_NAMES[t.goalDay]}요일까지</span>` : '';
-    const meta = `${esc(t.course || '기타')} · 마감 ${fmtDue(t.due)}${goal}<br>예상 ${t.hours}h · 이번 주 배치 ${placed.toFixed(1).replace(/\.0$/, '')}h`;
+    const mobTag = isMobileTask(t) ? ' · <span class="mobtag">이동 중 가능</span>' : '';
+    const meta = `${esc(t.course || '기타')} · 마감 ${fmtDue(t.due)}${goal}<br>예상 ${t.hours}h · 이번 주 배치 ${placed.toFixed(1).replace(/\.0$/, '')}h${mobTag}`;
     return itemRow({ color: colorFor(s, t.course), title: t.title, meta, cls: t.done ? 'done' : '', acts: `<button data-act="done" data-id="${t.id}" title="완료">✓</button><button data-act="del" data-id="${t.id}" title="삭제">✕</button>` });
   }).join('') : '<li class="empty">과제가 없어요</li>';
 
@@ -206,7 +238,7 @@ const addBot = (t, ops = [], err = false) => addMsg(esc(t) + (ops.length ? `<ul 
 function showPreview(draft, summary, applied) {
   const r = schedule(draft, { weekStart, now });
   const diff = diffPlans(plan, r.plan, draft.tasks);
-  preview = { draft, plan: r.plan, warnings: r.warnings, diff };
+  preview = { draft, plan: r.plan, commutes: r.commutes, today: r.today, warnings: r.warnings, diff };
   render();
   const el = document.createElement('div');
   el.className = 'preview';
@@ -241,6 +273,8 @@ const HELP = `이렇게 말해보세요:
 · "하루 최대 3시간만 공부할래"
 · "10시 이후에 공부 시작할래"
 · "운영체제 퀴즈 준비 다 했어"
+· "어제 4시간밖에 못 잤어" (컨디션 맞춤)
+· "통학 1시간 10분 걸려, 버스 타" (이동 중 학습)
 · "되돌려줘"`;
 
 async function handle(text) {
@@ -281,7 +315,7 @@ function ruleBased(text) {
   showPreview(draft, '', applied);
 }
 
-const CHIPS = [`${tmr}요일 저녁은 비워줘`, `${later}요일 7시부터 10시까지 알바`, `자료구조 과제 ${tmr}요일까지 끝낼래`, '하루 최대 3시간만 공부할래', '되돌려줘'];
+const CHIPS = ['어제 4시간밖에 못 잤어', '통학 1시간 10분 걸려', `${tmr}요일 저녁은 비워줘`, `자료구조 과제 ${tmr}요일까지 끝낼래`, '되돌려줘'];
 
 // ---------- 이벤트 ----------
 function fillDaySelects() {
@@ -425,6 +459,25 @@ function bind() {
     catch { toast('복사하지 못했어요'); }
   });
 
+  // 컨디션 바 (헬스케어 융합)
+  const setCond = (vals, source) => {
+    const s = clone(state);
+    const msg = applyOp(s, { type: 'set_condition', ...vals, source, now });
+    commit(s, msg);
+    return msg;
+  };
+  $('#condSleep').addEventListener('input', e => { $('#condSleepVal').textContent = `${e.target.value}h`; });
+  $('#condSleep').addEventListener('change', e => setCond({ sleep_hours: Number(e.target.value), stress: Number($('#condStress').value) }, 'manual'));
+  $('#condStress').addEventListener('change', e => setCond({ sleep_hours: Number($('#condSleep').value), stress: Number(e.target.value) }, 'manual'));
+  $('#btnWearable').addEventListener('click', () => {
+    // 실제 서비스에서는 Health Connect·HealthKit에서 지난밤 수면과 HRV 기반 스트레스를 읽는다
+    const sleep = 5.2;
+    const stress = 4;
+    const before = todayInfo ? todayInfo.capMin : null;
+    setCond({ sleep_hours: sleep, stress }, 'wearable');
+    addBot(`웨어러블(모의 데이터)에서 지난밤 수면 ${sleep}시간, 스트레스 ${stress}/5를 불러왔어요. 오늘 공부량을 ${before != null ? `${before / 60}시간 → ` : ''}${todayInfo.capMin / 60}시간으로 줄이고, 블록을 ${todayInfo.effect.blockCap}분으로 짧게 나눴어요. 남은 분량은 내일 이후로 옮겼어요.`);
+  });
+
   // 설정
   const dlg = $('#settings');
   $('#btnSettings').addEventListener('click', () => {
@@ -433,6 +486,8 @@ function bind() {
     f.studyEnd.value = state.prefs.studyEnd === '24:00' ? '23:59' : state.prefs.studyEnd;
     f.dailyMax.value = state.prefs.dailyMax;
     f.blockMin.value = state.prefs.blockMin;
+    f.commuteMin.value = state.prefs.commuteMin;
+    f.commuteMode.value = state.prefs.commuteMode;
     f.apiKey.value = app.apiKey || '';
     f.model.value = app.model || DEFAULT_MODEL;
     dlg.showModal();
@@ -446,6 +501,7 @@ function bind() {
     const end = f.studyEnd.value === '23:59' ? '24:00' : f.studyEnd.value;
     try {
       applyOp(s, { type: 'set_preferences', study_start: f.studyStart.value, study_end: end, daily_max_hours: Number(f.dailyMax.value), block_minutes: Number(f.blockMin.value) });
+      applyOp(s, { type: 'set_commute', minutes: Number(f.commuteMin.value), mode: f.commuteMode.value });
       commit(s, '설정을 저장했어요');
     } catch { save(); render(); }
   });
@@ -458,4 +514,4 @@ recompute();
 const tdue = new Date(now.getTime() + 3 * 86400000);
 tdue.setHours(23, 59, 0, 0);
 $('#taskForm').elements.due.value = localISO(tdue);
-addBot(`안녕하세요! 수업·개인일정·LMS 과제를 바탕으로 이번 주 공부 블록을 자동으로 배치했어요.\n${HELP}`);
+addBot(`안녕하세요! 수업·개인일정·LMS 과제를 바탕으로 이번 주 공부 블록을 자동으로 배치했어요.\n통학 시간(지하철 편도 50분)에는 퀴즈·발표 준비 같은 가벼운 과제를 '이동 중 학습'으로 넣었고, 오늘 컨디션을 기록하면 공부량을 자동으로 조절해요.\n${HELP}`);

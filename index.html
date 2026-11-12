@@ -105,7 +105,19 @@
           <span><i class="sw event"></i>개인일정</span>
           <span><i class="sw study"></i>공부 블록</span>
           <span><i class="sw blocked"></i>비워둠</span>
+          <span><i class="sw commute"></i>통학·이동 중 학습</span>
         </div>
+      </div>
+      <div class="condbar" id="condBar">
+        <span class="cond-title">오늘 컨디션</span>
+        <label>수면 <input type="range" id="condSleep" min="2" max="10" step="0.1" value="7" /> <output id="condSleepVal">7h</output></label>
+        <label>스트레스
+          <select id="condStress">
+            <option value="1">1 매우 낮음</option><option value="2">2 낮음</option><option value="3">3 보통</option><option value="4">4 높음</option><option value="5">5 매우 높음</option>
+          </select>
+        </label>
+        <button class="ghost small" id="btnWearable" title="실제 서비스에서는 Health Connect·HealthKit 연동">웨어러블 불러오기</button>
+        <span class="cond-effect" id="condEffect"></span>
       </div>
       <div class="warnings" id="warnings"></div>
       <div class="calendar" id="calendar"></div>
@@ -135,6 +147,14 @@
         <label>공부 가능 끝 <input type="time" name="studyEnd" /></label>
         <label>하루 최대 공부(시간) <input type="number" name="dailyMax" min="1" max="14" step="0.5" /></label>
         <label>한 블록 길이(분) <input type="number" name="blockMin" min="30" max="180" step="30" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>통학</legend>
+        <label>편도 시간(분) <input type="number" name="commuteMin" min="0" max="180" step="5" /></label>
+        <label>수단
+          <select name="commuteMode"><option>지하철</option><option>버스</option><option>도보</option><option>자차</option></select>
+        </label>
+        <p class="hint">수업이 있는 날 첫 수업 전·마지막 수업 후에 통학 구간이 생기고, 대중교통이면 가벼운 과제를 '이동 중 학습'으로 배치해요.</p>
       </fieldset>
       <fieldset>
         <legend>AI (선택)</legend>
