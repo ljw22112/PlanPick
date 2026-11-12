@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>플랜픽 · 대화로 고치는 대학생 AI 생활계획표</title>
+  <meta name="description" content="시간표·LMS 과제·개인일정을 모아 AI가 주간 공부 계획을 짜고, 대화로 고치는 대학생 플래너 데모" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%233b5bfd%22/%3E%3Ctext x=%2216%22 y=%2223%22 font-size=%2218%22 font-weight=%22800%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22%3EP%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <div class="logo">P</div>
+      <div>
+        <h1>플랜픽</h1>
+        <p class="sub">대화로 고치는 대학생 AI 생활계획표</p>
+      </div>
+    </div>
+    <div class="week" id="weekLabel"></div>
+    <div class="top-actions">
+      <span class="mode" id="modeBadge"></span>
+      <button class="ghost" id="btnDemo">데모 데이터</button>
+      <button class="ghost" id="btnClear">비우기</button>
+      <button class="ghost" id="btnSettings">설정</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- 왼쪽: 입력 -->
+    <aside class="panel side">
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="tasks">과제</button>
+        <button class="tab" data-tab="classes">수업</button>
+        <button class="tab" data-tab="events">개인일정</button>
+        <button class="tab" data-tab="import">가져오기</button>
+      </nav>
+
+      <section class="tabpane active" id="tab-tasks">
+        <ul class="items" id="taskList"></ul>
+        <form class="mini-form" id="taskForm">
+          <input name="title" placeholder="과제 이름" required />
+          <div class="row">
+            <input name="course" placeholder="과목" />
+            <input name="hours" type="number" min="0.5" step="0.5" value="2" title="예상 시간" />
+          </div>
+          <input name="due" type="datetime-local" required />
+          <button type="submit">과제 추가</button>
+        </form>
+      </section>
+
+      <section class="tabpane" id="tab-classes">
+        <ul class="items" id="classList"></ul>
+        <form class="mini-form" id="classForm">
+          <input name="title" placeholder="과목명" required />
+          <div class="row">
+            <select name="day"></select>
+            <input name="start" type="time" value="09:00" required />
+            <input name="end" type="time" value="10:30" required />
+          </div>
+          <button type="submit">수업 추가</button>
+        </form>
+      </section>
+
+      <section class="tabpane" id="tab-events">
+        <ul class="items" id="eventList"></ul>
+        <form class="mini-form" id="eventForm">
+          <input name="title" placeholder="일정 (예: 알바)" required />
+          <div class="row">
+            <select name="day"></select>
+            <input name="start" type="time" value="18:00" required />
+            <input name="end" type="time" value="21:00" required />
+          </div>
+          <button type="submit">일정 추가</button>
+        </form>
+      </section>
+
+      <section class="tabpane" id="tab-import">
+        <div class="import-card">
+          <h3>LMS 과제 (.ics)</h3>
+          <p>LMS 캘린더에서 내보낸 .ics 파일을 올리면 과제·퀴즈 마감을 가져와요. Canvas·Moodle·블랙보드 형식을 지원해요.</p>
+          <label class="file">파일 선택<input type="file" id="icsFile" accept=".ics,text/calendar" /></label>
+          <button class="ghost small" id="btnSampleIcs">예시 .ics로 체험</button>
+        </div>
+        <div class="import-card">
+          <h3>시간표 이미지</h3>
+          <p>에브리타임 등 시간표 스크린샷을 AI가 읽어 수업으로 넣어요. 설정에서 API 키가 필요해요.</p>
+          <label class="file" id="ttLabel">이미지 선택<input type="file" id="ttFile" accept="image/*" /></label>
+        </div>
+        <div class="import-card">
+          <h3>캘린더로 내보내기</h3>
+          <p>만든 계획을 .ics 텍스트로 복사해 구글·애플 캘린더에 넣을 수 있어요.</p>
+          <button class="ghost small" id="btnExport">.ics 복사</button>
+        </div>
+      </section>
+    </aside>
+
+    <!-- 가운데: 주간 계획표 -->
+    <section class="panel board">
+      <div class="board-head">
+        <div class="stats" id="stats"></div>
+        <div class="legend">
+          <span><i class="sw class"></i>수업</span>
+          <span><i class="sw event"></i>개인일정</span>
+          <span><i class="sw study"></i>공부 블록</span>
+          <span><i class="sw blocked"></i>비워둠</span>
+        </div>
+      </div>
+      <div class="warnings" id="warnings"></div>
+      <div class="calendar" id="calendar"></div>
+    </section>
+
+    <!-- 오른쪽: 대화 -->
+    <section class="panel chat">
+      <div class="chat-head">
+        <h2>계획 고치기</h2>
+        <button class="ghost small" id="btnUndo" title="마지막 변경 되돌리기">되돌리기</button>
+      </div>
+      <div class="messages" id="messages"></div>
+      <div class="chips" id="chips"></div>
+      <form class="composer" id="composer">
+        <textarea id="input" rows="2" placeholder="하고 싶은 변경을 말해보세요"></textarea>
+        <button type="submit" id="send">보내기</button>
+      </form>
+    </section>
+  </main>
+
+  <dialog id="settings">
+    <form method="dialog" class="settings">
+      <h2>설정</h2>
+      <fieldset>
+        <legend>공부 선호</legend>
+        <label>공부 가능 시작 <input type="time" name="studyStart" /></label>
+        <label>공부 가능 끝 <input type="time" name="studyEnd" /></label>
+        <label>하루 최대 공부(시간) <input type="number" name="dailyMax" min="1" max="14" step="0.5" /></label>
+        <label>한 블록 길이(분) <input type="number" name="blockMin" min="30" max="180" step="30" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>AI (선택)</legend>
+        <p class="hint">Claude API 키를 넣으면 자유로운 한국어 요청을 LLM이 함수호출로 해석해요. 키는 이 브라우저에만 저장되고 Anthropic API로만 전송돼요. 비워두면 규칙 기반 파서로 동작해요.</p>
+        <label>API 키 <input type="password" name="apiKey" placeholder="sk-ant-..." autocomplete="off" /></label>
+        <label>모델 <input type="text" name="model" placeholder="claude-haiku-5-5" /></label>
+      </fieldset>
+      <div class="dialog-actions">
+        <button value="cancel" class="ghost">닫기</button>
+        <button value="save" id="saveSettings">저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
