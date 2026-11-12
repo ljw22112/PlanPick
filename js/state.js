@@ -123,8 +123,8 @@ export function applyOp(state, op) {
     }
     case 'block_time': {
       checkRange(op.day, op.start, op.end);
-      state.blocked.push({ id: newId('x'), day: op.day, start: normTime(op.start), end: normTime(op.end), reason: op.reason || '비워둠' });
-      return `${dayLabel(op.day)} ${normTime(op.start)}–${normTime(op.end)} 비워둠`;
+      state.blocked.push({ id: newId('x'), day: op.day, start: normTime(op.start), end: normTime(op.end), reason: op.reason || '비워둠', recurring: !!op.recurring });
+      return `${op.recurring ? '매주 ' : ''}${dayLabel(op.day)} ${normTime(op.start)}–${normTime(op.end)} ${op.recurring ? '공부 안 함(규칙으로 기억)' : '비워둠'}`;
     }
     case 'remove_item': {
       for (const key of ['events', 'blocked', 'tasks', 'classes', 'habits']) {
@@ -179,6 +179,7 @@ export function applyOp(state, op) {
       if (!parts.length) throw new Error('수면 시간이나 스트레스 중 하나는 필요해요.');
       c.source = op.source || 'chat';
       state.condition = c;
+      state.condHistory = { ...(state.condHistory || {}), [c.date]: { sleep: c.sleep, stress: c.stress } };
       return `오늘 컨디션 기록: ${parts.join(', ')}`;
     }
     case 'set_commute': {
@@ -214,9 +215,78 @@ export function applyOp(state, op) {
       state.interests = op.mode === 'add' ? [...new Set([...(state.interests || []), ...fields])] : [...new Set(fields)];
       return `희망 분야: ${state.interests.join(', ')}`;
     }
+    case 'split_task': {
+      // 큰 과제를 단계로 쪼개고 단계별 중간 마감을 둔다
+      const t = state.tasks.find(x => x.id === op.task_id);
+      if (!t) throw new Error(`과제 '${op.task_id}'를 찾지 못했어요.`);
+      const steps = (op.steps && op.steps.length ? op.steps : templateSteps(t)).map(x => (typeof x === 'string' ? { name: x } : x));
+      const total = steps.reduce((a, x) => a + (x.share || 1), 0);
+      const now = op.now ? new Date(op.now) : new Date();
+      const due = new Date(t.due);
+      const span = Math.max(0, due - now);
+      let cum = 0;
+      const subs = steps.map((x, i) => {
+        cum += (x.share || 1) / total;
+        const d = i === steps.length - 1 ? due : new Date(now.getTime() + span * cum);
+        if (i < steps.length - 1) d.setHours(23, 59, 0, 0);
+        return { id: newId('t'), title: `${t.title} · ${i + 1}. ${x.name}`, course: t.course, due: localISO(d), hours: Math.max(0.5, Math.round((t.hours * (x.share || 1) / total) * 2) / 2), parent: t.id };
+      });
+      state.tasks = state.tasks.filter(x => x.id !== t.id).concat(subs);
+      return `'${t.title}'를 ${subs.length}단계로 나눔: ${subs.map(x => `${x.title.split(' · ')[1]}(~${x.due.slice(5, 10).replace('-', '/')}, ${x.hours}h)`).join(' → ')}`;
+    }
+    case 'add_exam': {
+      // 시험기간 모드: 시험일 기준 D-7, D-4, D-2, D-1 복습 회차(간격 반복)
+      if (!op.course || !op.date) throw new Error('과목(course)과 시험일(date)이 필요해요.');
+      const exam = new Date(op.date);
+      const now = op.now ? new Date(op.now) : new Date();
+      const total = Number(op.hours) || 8;
+      const plan = [[7, 0.2], [4, 0.25], [2, 0.25], [1, 0.3]].filter(([dd]) => new Date(exam.getTime() - dd * 86400000) > now);
+      if (!plan.length) throw new Error('시험까지 남은 날이 너무 적어요.');
+      const sum = plan.reduce((a, [, w]) => a + w, 0);
+      const made = plan.map(([dd, w], i) => {
+        const d = new Date(exam.getTime() - dd * 86400000);
+        d.setHours(23, 59, 0, 0);
+        const task = { id: newId('t'), title: `${op.course} 시험 복습 ${i + 1}회차 (D-${dd})`, course: op.course, due: localISO(d), hours: Math.max(0.5, Math.round((total * w / sum) * 2) / 2), exam: true };
+        state.tasks.push(task);
+        return task;
+      });
+      state.exams = [...(state.exams || []), { course: op.course, date: op.date }];
+      colorFor(state, op.course);
+      return `${op.course} 시험(${op.date.slice(5, 10).replace('-', '/')}) 대비 복습 ${made.length}회 배치: ${made.map(x => `D-${x.title.match(/D-(\d+)/)[1]} ${x.hours}h`).join(', ')}`;
+    }
+    case 'log_block': {
+      // 실행 기록: 실제 소요시간을 남겨 다음 예측과 집중 시간대 학습에 쓴다
+      const t = state.tasks.find(x => x.id === op.task_id);
+      const h = (state.habits || []).find(x => x.id === op.task_id);
+      state.log = [...(state.log || []), { taskId: op.task_id, course: t ? t.course : h ? h.kind : '', planned: op.planned, actual: op.actual, hour: op.hour, done: !!op.done, date: op.date }];
+      if (t && op.done) {
+        t.doneMin = (t.doneMin || 0) + op.actual;
+        if (op.finished) t.done = true;
+      }
+      if (!op.done) return `'${(t || h || {}).title}' 이번 블록은 못 함 → 남은 시간에 다시 배치`;
+      return `'${(t || h || {}).title}' ${op.actual}분 기록${op.finished ? ' · 과제 완료' : ''}`;
+    }
+    case 'set_commute_delay': {
+      const now = op.now ? new Date(op.now) : new Date();
+      state.commuteDelay = { date: localDateKey(now), min: Math.max(0, Math.round(op.minutes || 0)) };
+      return state.commuteDelay.min ? `오늘 통학 ${state.commuteDelay.min}분 지연 반영` : '통학 지연 해제';
+    }
+    case 'set_checklist': {
+      const t = state.tasks.find(x => x.id === op.task_id);
+      if (!t) throw new Error('과제를 찾지 못했어요.');
+      t.checklist = { ...(t.checklist || {}), [op.item]: !!op.checked };
+      return '체크리스트 저장';
+    }
     default:
       throw new Error(`알 수 없는 연산: ${op.type}`);
   }
+}
+
+// 과제 유형별 기본 단계(비율)
+export function templateSteps(t) {
+  if (/구현|코딩|프로그래밍|과제\d|알고리즘|실습/.test(t.title)) return [{ name: '문제 분석·설계', share: 2 }, { name: '구현', share: 5 }, { name: '테스트·제출', share: 3 }];
+  if (/보고서|레포트|팀플|발표|ERD|기획|논문/.test(t.title)) return [{ name: '자료 조사', share: 3 }, { name: '초안 작성', share: 4 }, { name: '검토·제출', share: 3 }];
+  return [{ name: '내용 이해', share: 3 }, { name: '본 작업', share: 5 }, { name: '마무리', share: 2 }];
 }
 
 // LLM에 넘길 압축 상태
@@ -232,6 +302,7 @@ export function summarizeForLLM(state, weekStart, now) {
     now: localISO(now),
     classes: state.classes.map(({ id, title, day, start, end }) => ({ id, title, day, start, end })),
     events: state.events,
+    exams: state.exams || [],
     habits: state.habits || [],
     interests: state.interests || [],
     blocked: state.blocked,

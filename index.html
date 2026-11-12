@@ -21,6 +21,9 @@
     <div class="week" id="weekLabel"></div>
     <div class="top-actions">
       <span class="mode" id="modeBadge"></span>
+      <button class="ghost" id="btnBrief">브리핑</button>
+      <button class="ghost" id="btnReport">리포트</button>
+      <button class="ghost" id="btnTeam">팀플</button>
       <button class="ghost" id="btnInterests">관심사</button>
       <button class="ghost" id="btnDemo">데모 데이터</button>
       <button class="ghost" id="btnClear">비우기</button>
@@ -49,6 +52,15 @@
           </div>
           <input name="due" type="datetime-local" required />
           <button type="submit">과제 추가</button>
+        </form>
+        <form class="mini-form" id="examForm">
+          <h3 class="sec">시험 등록 <small>D-7·4·2·1 복습 회차 자동 배치</small></h3>
+          <div class="row">
+            <input name="course" placeholder="과목" required />
+            <input name="hours" type="number" min="2" max="40" value="8" title="총 복습 시간" />
+          </div>
+          <input name="date" type="datetime-local" required />
+          <button type="submit">시험기간 모드 켜기</button>
         </form>
       </section>
 
@@ -118,6 +130,28 @@
           <label class="file" id="ttLabel">이미지 선택<input type="file" id="ttFile" accept="image/*" /></label>
         </div>
         <div class="import-card">
+          <h3>단톡방·공지 붙여넣기</h3>
+          <p>팀플방 대화나 학과 공지를 붙여넣으면 회의·마감·마감 연기를 찾아 반영해요.</p>
+          <textarea id="pasteText" rows="4" placeholder="예: 우리 금요일 7시에 회의하자"></textarea>
+          <div class="row-btns"><button class="small" id="btnPaste">일정 찾기</button><button class="ghost small" id="btnPasteSample">예시 넣기</button></div>
+        </div>
+        <div class="import-card">
+          <h3>강의계획서 PDF</h3>
+          <p>주차별 시험·과제를 찾아 한 학기 일정을 미리 넣어요. 시험은 복습 회차까지 배치해요.</p>
+          <input id="sylCourse" placeholder="과목명 (예: 운영체제)" />
+          <div class="row-btns"><label class="file">PDF 선택<input type="file" id="sylFile" accept="application/pdf,.pdf,.txt" /></label><button class="ghost small" id="btnSylSample">예시로 체험</button></div>
+        </div>
+        <div class="import-card">
+          <h3>알바 근무표 사진</h3>
+          <p>매주 바뀌는 근무표를 사진으로 넣으면 이번 주 근무를 일정에 넣어요. API 키가 필요해요.</p>
+          <label class="file" id="shiftLabel">사진 선택<input type="file" id="shiftFile" accept="image/*" /></label>
+        </div>
+        <div class="import-card">
+          <h3>학사일정 · 개인 캘린더</h3>
+          <p>학사일정(예시)을 넣으면 시험기간 D-day를 브리핑에 띄워요. 구글·애플 캘린더에서 내보낸 .ics로 개인 일정도 가져와요.</p>
+          <div class="row-btns"><button class="ghost small" id="btnAcademic">학사일정 넣기(예시)</button><label class="file">캘린더 .ics<input type="file" id="calFile" accept=".ics,text/calendar" /></label></div>
+        </div>
+        <div class="import-card">
           <h3>캘린더로 내보내기</h3>
           <p>만든 계획을 .ics 텍스트로 복사해 구글·애플 캘린더에 넣을 수 있어요.</p>
           <button class="ghost small" id="btnExport">.ics 복사</button>
@@ -139,6 +173,7 @@
           <span><i class="sw commute"></i>통학·이동 중 학습</span>
         </div>
       </div>
+      <div class="nowcard" id="nowCard"></div>
       <div class="condbar" id="condBar">
         <span class="cond-title">오늘 컨디션</span>
         <label>수면 <input type="range" id="condSleep" min="2" max="10" step="0.1" value="7" /> <output id="condSleepVal">7h</output></label>
@@ -148,9 +183,11 @@
           </select>
         </label>
         <button class="ghost small" id="btnWearable" title="실제 서비스에서는 Health Connect·HealthKit 연동">웨어러블 불러오기</button>
+        <button class="ghost small" id="btnDelay" title="실제 서비스에서는 실시간 교통 정보 연동">지하철 지연 +15분(시연)</button>
         <span class="cond-effect" id="condEffect"></span>
       </div>
       <div class="warnings" id="warnings"></div>
+      <div class="fixopts" id="fixOpts"></div>
       <div class="calendar" id="calendar"></div>
     </section>
 
@@ -163,6 +200,7 @@
       <div class="messages" id="messages"></div>
       <div class="chips" id="chips"></div>
       <form class="composer" id="composer">
+        <button type="button" class="ghost mic" id="btnMic" title="음성으로 말하기">🎤</button>
         <textarea id="input" rows="2" placeholder="하고 싶은 변경을 말해보세요"></textarea>
         <button type="submit" id="send">보내기</button>
       </form>
@@ -188,11 +226,20 @@
         <p class="hint">수업이 있는 날 첫 수업 전·마지막 수업 후에 통학 구간이 생기고, 대중교통이면 가벼운 과제를 '이동 중 학습'으로 배치해요.</p>
       </fieldset>
       <fieldset>
+        <legend>에이전트</legend>
+        <label>변경 적용 방식
+          <select name="agentMode"><option value="confirm">미리보기 후 내가 적용</option><option value="auto">바로 적용 (되돌리기 가능)</option></select>
+        </label>
+        <label>먼저 챙겨주기 <select name="proactive"><option value="on">켜기 (브리핑·밀린 일·알림)</option><option value="off">끄기</option></select></label>
+        <label>내 이름(팀플 코드용) <input name="myName" placeholder="예: 지원" /></label>
+      </fieldset>
+      <fieldset>
         <legend>AI (선택)</legend>
         <p class="hint">Claude API 키를 넣으면 자유로운 한국어 요청을 LLM이 함수호출로 해석해요. 키는 이 브라우저에만 저장되고 Anthropic API로만 전송돼요. 비워두면 규칙 기반 파서로 동작해요.</p>
         <label>API 키 <input type="password" name="apiKey" placeholder="sk-ant-..." autocomplete="off" /></label>
         <label>모델 <input type="text" name="model" placeholder="claude-haiku-5-5" /></label>
       </fieldset>
+      <p class="hint"><a href="admin.html" target="_blank" rel="noopener">대학용 대시보드(모의 데이터) 보기 →</a></p>
       <div class="dialog-actions">
         <button value="cancel" class="ghost">닫기</button>
         <button value="save" id="saveSettings">저장</button>
@@ -213,6 +260,23 @@
       <span id="obCount">0개 선택</span>
       <button id="obSkip" class="ghost">건너뛰기</button>
       <button id="obDone" disabled>내 계획표 만들기</button>
+    </div>
+  </div>
+
+  <dialog id="modal"><div class="modal-body" id="modalBody"></div></dialog>
+
+  <div class="focus" id="focus" hidden>
+    <div class="focus-in">
+      <div class="f-task" id="fTask"></div>
+      <div class="f-time" id="fTime">25:00</div>
+      <div class="f-sub" id="fSub"></div>
+      <div class="f-bar"><i id="fBar"></i></div>
+      <div class="f-acts">
+        <button class="ghost" id="fPause">일시정지</button>
+        <button id="fDone">끝냈어요</button>
+        <button class="ghost" id="fStop">그만하기</button>
+      </div>
+      <label class="f-speed"><input type="checkbox" id="fFast" /> 시연용 60배속</label>
     </div>
   </div>
 

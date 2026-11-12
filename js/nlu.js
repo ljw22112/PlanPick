@@ -82,6 +82,41 @@ export function parseKorean(text, state, today) {
   if (/되돌|원래대로|취소해|없던 ?일/.test(t)) return { special: 'undo' };
   if (/다시 ?짜|재계획|새로 ?짜|계획 ?(세워|만들)/.test(t)) return { ops: [], special: 'reschedule' };
 
+  // 에이전트 기능 호출
+  if (/브리핑|오늘 뭐 ?해|오늘 할 ?일|회고/.test(t)) return { special: 'briefing' };
+  if (/리포트|주간 ?통계|이번 ?주 어땠/.test(t)) return { special: 'report' };
+  if (/팀플.*(시간|맞춰|언제)|공통.*빈 ?시간|회의 시간/.test(t)) return { special: 'team' };
+  if (/공강/.test(t)) return { special: 'gaps' };
+  const why = t.match(/(.*?)(왜 (?:이|그) ?시간|왜 여기|왜 거기|이유)/);
+  if (why && /왜|이유/.test(t)) return { special: 'explain', query: why[1].replace(/[은는이가을를]\s*$/, '').trim() };
+
+  // 지하철·버스 지연 (실시간 교통 연동 자리)
+  if (/(지하철|버스|전철).*(지연|늦|밀려)/.test(t)) {
+    const m = t.match(/(\d+)\s*분/);
+    return { ops: [{ type: 'set_commute_delay', minutes: m ? Number(m[1]) : 15 }] };
+  }
+
+  // 시험기간 모드: "확률통계 시험 11월 20일", "운영체제 기말 12/16 10시간"
+  const ex = t.match(/(\S+?)\s*(?:중간|기말)?\s*(?:시험|고사|기말|중간)\D*?(\d{1,2})\s*[/.월]\s*(\d{1,2})/);
+  if (ex && /시험|고사|기말|중간/.test(t)) {
+    const y = new Date().getFullYear();
+    const hrs = (t.match(/(\d+)\s*시간/) || [])[1];
+    const date = `${y}-${String(ex[2]).padStart(2, '0')}-${String(ex[3]).padStart(2, '0')}T10:00`;
+    return { ops: [{ type: 'add_exam', course: ex[1].replace(/[은는이가]$/, ''), date, hours: hrs ? Number(hrs) : 8 }] };
+  }
+
+  // 과제 쪼개기
+  if (/쪼개|나눠|단계/.test(t)) {
+    const tk = findTask(t, state.tasks);
+    if (tk) return { ops: [{ type: 'split_task', task_id: tk.id }] };
+  }
+
+  // "만약 ~하면?" → 적용 전 시뮬레이션
+  let simulate = false;
+  let src = t;
+  if (/^(만약|만일)|하면 어떻게|하면 어때|라면\??$/.test(t)) { simulate = true; src = t.replace(/^(만약에?|만일)\s*/, '').replace(/(하면 어떻게 ?돼\??|하면 어때\??|라면\??)$/, '').trim(); }
+  if (simulate && src !== t) { const r = parseKorean(src, state, today); if (r.ops && r.ops.length) return { ...r, simulate: true }; }
+
   // 대외활동 추천·희망 분야
   if (/(대외활동|공고|공모전|서포터즈).*(추천|뭐 ?있|찾아)/.test(t)) return { special: 'recommend' };
   const FIELDS = ['AI·데이터', '개발', '창업', '마케팅', '디자인', '기획', '금융', '환경·ESG', '봉사', '글로벌', '취업'];
@@ -167,15 +202,16 @@ export function parseKorean(text, state, today) {
   }
 
   // 시간 비우기 / 일정 추가
+  const recurring = /앞으로|항상|매주|맨날|언제나|규칙/.test(t);
   if (days.length && range) {
     const free = /비워|비우|쉬|쉴|빼줘|빼 ?줘|공부 ?(안|말)|놀|휴식/.test(t);
     const word = EVENT_WORDS.find(w => t.includes(w));
     for (const d of days) {
-      if (free && !word) ops.push({ type: 'block_time', day: d, start: range[0], end: range[1], reason: '휴식' });
+      if (free && !word) ops.push({ type: 'block_time', day: d, start: range[0], end: range[1], reason: recurring ? '내 규칙' : '휴식', recurring });
       else ops.push({ type: 'add_event', day: d, title: word || (free ? '휴식' : '개인 일정'), start: range[0], end: range[1] });
     }
-  } else if (days.length && !range && /비워|쉬|쉴|휴식|놀/.test(t)) {
-    for (const d of days) ops.push({ type: 'block_time', day: d, start: '00:00', end: '24:00', reason: '휴식' });
+  } else if (days.length && !range && /비워|쉬|쉴|휴식|놀|공부 ?(안|말)/.test(t)) {
+    for (const d of days) ops.push({ type: 'block_time', day: d, start: '00:00', end: '24:00', reason: recurring ? '내 규칙' : '휴식', recurring });
   }
 
   if (ops.length) return { ops };

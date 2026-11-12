@@ -15,8 +15,8 @@ export const TOOLS = [
   },
   {
     name: 'block_time',
-    description: '공부를 넣지 않을 시간(휴식, 비워두기)을 지정한다. 하루 전체는 00:00–24:00.',
-    input_schema: { type: 'object', properties: { day: dayProp, start: timeProp, end: timeProp, reason: { type: 'string' } }, required: ['day', 'start', 'end'] },
+    description: '공부를 넣지 않을 시간(휴식, 비워두기)을 지정한다. 하루 전체는 00:00–24:00. "앞으로/항상/매주"처럼 계속 지킬 규칙이면 recurring true(주가 바뀌어도 유지).',
+    input_schema: { type: 'object', properties: { day: dayProp, start: timeProp, end: timeProp, reason: { type: 'string' }, recurring: { type: 'boolean' } }, required: ['day', 'start', 'end'] },
   },
   {
     name: 'remove_item',
@@ -59,6 +59,21 @@ export const TOOLS = [
     input_schema: { type: 'object', properties: { title: { type: 'string' }, per_week: { type: 'integer', minimum: 0, maximum: 7 }, minutes: { type: 'integer' }, window_start: timeProp, window_end: timeProp, kind: { type: 'string', enum: ['운동', '어학'] } }, required: ['title'] },
   },
   {
+    name: 'split_task',
+    description: '큰 과제를 단계로 쪼개 단계별 중간 마감을 둔다. steps를 생략하면 과제 유형에 맞는 기본 단계(설계·구현·테스트 / 자료조사·초안·검토).',
+    input_schema: { type: 'object', properties: { task_id: { type: 'string' }, steps: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, share: { type: 'number' } }, required: ['name'] } } }, required: ['task_id'] },
+  },
+  {
+    name: 'add_exam',
+    description: '시험기간 모드: 시험일 기준 D-7·4·2·1에 복습 회차를 간격 반복으로 배치한다.',
+    input_schema: { type: 'object', properties: { course: { type: 'string' }, date: { type: 'string', description: 'YYYY-MM-DDTHH:MM' }, hours: { type: 'number', description: '총 복습 시간' } }, required: ['course', 'date'] },
+  },
+  {
+    name: 'set_commute_delay',
+    description: '[모빌리티] 오늘 지하철·버스 지연(분)을 반영해 통학 구간과 이동 중 학습을 다시 계산한다. 0이면 해제.',
+    input_schema: { type: 'object', properties: { minutes: { type: 'integer', minimum: 0 } }, required: ['minutes'] },
+  },
+  {
     name: 'set_interests',
     description: '대외활동 추천에 쓰는 희망 분야를 정한다. 분야: AI·데이터, 개발, 창업, 마케팅, 디자인, 기획, 금융, 환경·ESG, 봉사, 글로벌, 취업. mode add면 기존에 추가.',
     input_schema: { type: 'object', properties: { fields: { type: 'array', items: { type: 'string' } }, mode: { type: 'string', enum: ['set', 'add'] } }, required: ['fields'] },
@@ -73,7 +88,9 @@ function systemPrompt(state, weekStart, now) {
 - 시간 표현: '2시'처럼 오전/오후가 없고 1~7시면 오후로 본다. '저녁'은 18–22시, '밤'은 21–24시, '오전'은 9–12시, '오후'는 13–18시.
 - 과제는 이름·과목으로 tasks에서 찾아 id를 쓴다. 애매하면 도구를 부르지 말고 짧게 되묻는다.
 - 필요한 만큼 여러 도구를 한 번에 호출해도 된다.
-- 피곤·수면 부족·스트레스 이야기는 set_condition, 통학 시간·수단 이야기는 set_commute로 반영한다.
+- 피곤·수면 부족·스트레스 이야기는 set_condition, 통학 시간·수단 이야기는 set_commute, 지하철 지연은 set_commute_delay로 반영한다.
+- "만약 ~하면?" 같은 가정 질문도 도구를 호출해라. 앱이 적용 전 미리보기로 보여준다.
+- "왜 이 시간이야?"처럼 배치 이유를 물으면 도구를 부르지 말고, 마감·컨디션·통학·집중 시간대 관점에서 짧게 설명해라.
 - 도구를 다 부른 뒤 무엇을 바꿨는지 한두 문장 반말이 아닌 친근한 존댓말로 요약한다. 일정과 무관한 질문엔 짧게 답한다.
 현재 상태(JSON):
 ${summarizeForLLM(state, weekStart, now)}`;
@@ -127,7 +144,7 @@ export async function runLLM({ apiKey, model, history, userText, draft, weekStar
 }
 
 // 시간표 이미지 → 수업 목록 (비전)
-export async function readTimetableImage({ apiKey, model, file }) {
+export async function readTimetableImage({ apiKey, model, file, prompt }) {
   const b64 = await new Promise((ok, fail) => {
     const r = new FileReader();
     r.onload = () => ok(String(r.result).split(',')[1]);
@@ -149,7 +166,7 @@ export async function readTimetableImage({ apiKey, model, file }) {
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: file.type || 'image/png', data: b64 } },
-          { type: 'text', text: '이 대학 시간표 이미지에서 수업을 모두 읽어 JSON 배열만 출력해. 형식: [{"title":"과목명","day":0,"start":"HH:MM","end":"HH:MM"}] day는 0=월…6=일. 같은 과목이 여러 요일이면 각각 따로. 다른 말은 쓰지 마.' },
+          { type: 'text', text: prompt || '이 대학 시간표 이미지에서 수업을 모두 읽어 JSON 배열만 출력해. 형식: [{"title":"과목명","day":0,"start":"HH:MM","end":"HH:MM"}] day는 0=월…6=일. 같은 과목이 여러 요일이면 각각 따로. 다른 말은 쓰지 마.' },
         ],
       }],
     }),
@@ -159,4 +176,34 @@ export async function readTimetableImage({ apiKey, model, file }) {
   const text = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
   const json = text.slice(text.indexOf('['), text.lastIndexOf(']') + 1);
   return JSON.parse(json);
+}
+
+export const SHIFT_PROMPT = '이 아르바이트 근무표 이미지에서 이번 주 내 근무를 읽어 JSON 배열만 출력해. 형식: [{"title":"근무지 알바","day":0,"start":"HH:MM","end":"HH:MM"}] day는 0=월…6=일. 이름이 여러 명이면 가장 많이 나오는 한 사람 기준. 다른 말은 쓰지 마.';
+
+// 텍스트(강의계획서·단톡방)를 LLM으로 연산 목록으로
+export async function extractWithLLM({ apiKey, model, text, kind, now }) {
+  const sys = kind === 'syllabus'
+    ? `강의계획서에서 시험과 과제를 찾아 JSON 배열만 출력해. 형식: [{"type":"add_exam","course":"과목","date":"YYYY-MM-DDTHH:MM","hours":8} 또는 {"type":"add_task","title":"","course":"","due":"YYYY-MM-DDTHH:MM","hours":4}]. 오늘은 ${now.toISOString().slice(0, 10)}. 주차만 있으면 이번 학기 시작 월요일 기준으로 날짜를 계산해.`
+    : `단톡방·공지 글에서 내 일정과 마감을 찾아 JSON 배열만 출력해. 형식: {"type":"add_event","title":"","kind":"알바|대외활동|운동|기타","day":0,"start":"HH:MM","end":"HH:MM"} (day 0=월, 이번 주) 또는 {"type":"add_task","title":"","due":"YYYY-MM-DDTHH:MM","hours":2}. 오늘은 ${now.toISOString().slice(0, 10)}.`;
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+    body: JSON.stringify({ model, max_tokens: 1500, system: sys, messages: [{ role: 'user', content: text.slice(0, 20000) }] }),
+  });
+  if (!res.ok) throw new Error(`API 오류 ${res.status}`);
+  const data = await res.json();
+  const out = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
+  return JSON.parse(out.slice(out.indexOf('['), out.lastIndexOf(']') + 1));
+}
+
+// 과제 시작 도우미: 대신 써주지 않고 요구사항 정리와 첫 단계만
+export async function startHelper({ apiKey, model, task }) {
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+    body: JSON.stringify({ model, max_tokens: 600, messages: [{ role: 'user', content: `대학생 과제 '${task.title}'(과목 ${task.course || '미정'}, 예상 ${task.hours}시간)를 지금 시작하려 해. 과제를 대신 써주지 말고, (1) 확인할 요구사항 3개 (2) 25분 안에 끝낼 첫 단계 3개를 짧은 한국어 목록으로만 줘.` }] }),
+  });
+  if (!res.ok) throw new Error(`API 오류 ${res.status}`);
+  const data = await res.json();
+  return data.content.filter(b => b.type === 'text').map(b => b.text).join('');
 }

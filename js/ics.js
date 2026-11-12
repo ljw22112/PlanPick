@@ -79,3 +79,29 @@ DTEND:${d(4)}T180000
 END:VEVENT
 END:VCALENDAR`;
 };
+
+// 개인 캘린더(.ics) → 이번 주 고정 일정
+export function parseICSEvents(text, weekStart) {
+  const out = [];
+  const lines = unfold(text).split(/\r?\n/);
+  let cur = null;
+  for (const line of lines) {
+    if (line.startsWith('BEGIN:VEVENT')) { cur = {}; continue; }
+    if (line.startsWith('END:VEVENT')) { if (cur && cur.summary && cur.start && cur.end) out.push(cur); cur = null; continue; }
+    if (!cur) continue;
+    const i = line.indexOf(':');
+    if (i < 0) continue;
+    const [name, ...params] = line.slice(0, i).split(';');
+    const value = line.slice(i + 1).trim();
+    if (name === 'SUMMARY') cur.summary = unescape(value);
+    if (name === 'DTSTART' && /T/.test(value)) cur.start = parseDate(value, params.join(';'));
+    if (name === 'DTEND' && /T/.test(value)) cur.end = parseDate(value, params.join(';'));
+  }
+  const end = new Date(weekStart.getTime() + 7 * 86400000);
+  const p = n => String(n).padStart(2, '0');
+  return out.filter(e => e.start >= weekStart && e.start < end && e.end > e.start).map(e => ({
+    title: e.summary, day: (e.start.getDay() + 6) % 7,
+    start: `${p(e.start.getHours())}:${p(e.start.getMinutes())}`,
+    end: e.end.getDate() !== e.start.getDate() ? '24:00' : `${p(e.end.getHours())}:${p(e.end.getMinutes())}`,
+  }));
+}
