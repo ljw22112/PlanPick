@@ -82,6 +82,31 @@ export function parseKorean(text, state, today) {
   if (/되돌|원래대로|취소해|없던 ?일/.test(t)) return { special: 'undo' };
   if (/다시 ?짜|재계획|새로 ?짜|계획 ?(세워|만들)/.test(t)) return { ops: [], special: 'reschedule' };
 
+  // 대외활동 추천·희망 분야
+  if (/(대외활동|공고|공모전|서포터즈).*(추천|뭐 ?있|찾아)/.test(t)) return { special: 'recommend' };
+  const FIELDS = ['AI·데이터', '개발', '창업', '마케팅', '디자인', '기획', '금융', '환경·ESG', '봉사', '글로벌', '취업'];
+  if (/관심 ?분야|희망 ?분야/.test(t)) {
+    const norm = x => x.replace(/[·\s]/g, '').toLowerCase();
+    const found = FIELDS.filter(f => norm(t).includes(norm(f)) || (f === 'AI·데이터' && /ai|데이터/i.test(t)) || (f === '환경·ESG' && /환경|esg/i.test(t)));
+    if (found.length) return { ops: [{ type: 'set_interests', fields: found, mode: /추가|도|넣어/.test(t) ? 'add' : 'set' }] };
+  }
+
+  // 반복 목표(운동·어학): "헬스 주 4회 1시간", "영어 단어 매일 30분"
+  const habitWord = (t.match(/(헬스|운동|러닝|달리기|요가|수영|필라테스|클라이밍|영어 ?단어|영어|토익|일본어|중국어)/) || [])[1];
+  const freq = t.match(/주\s*(\d)\s*(?:회|번)|매일/);
+  if (habitWord && freq) {
+    const op = { type: 'set_habit', title: habitWord.replace(/\s+/g, ' '), per_week: freq[0] === '매일' ? 7 : Number(freq[1]) };
+    if (/영어|토익|일본어|중국어/.test(habitWord)) { op.window_start = '07:00'; op.window_end = '23:00'; }
+    const dur = t.match(/(\d+(?:\.\d+)?)\s*(시간|분)(?!까지|부터)/);
+    if (dur) op.minutes = Number(dur[1]) * (dur[2] === '시간' ? 60 : 1);
+    if (/아침|오전/.test(t)) { op.window_start = '06:00'; op.window_end = '12:00'; }
+    else if (/저녁|밤/.test(t)) { op.window_start = '18:00'; op.window_end = '23:00'; }
+    // 기존 목표 이름과 맞추기 ("운동" → 이미 있는 "헬스")
+    const existing = (state.habits || []).find(h => h.title === op.title || (op.title === '운동' && h.kind === '운동') || (/영어/.test(op.title) && /영어/.test(h.title)));
+    if (existing) op.title = existing.title;
+    return { ops: [op] };
+  }
+
   const ops = [];
   const days = parseDays(t, today);
   const range = parseTimeRange(t);

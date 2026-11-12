@@ -139,6 +139,37 @@ export function schedule(state, { weekStart, now }) {
     moving.push(pastCut(mv, d).filter(([a, b]) => b - a >= 20));
   }
 
+  // 1-b) 운동 등 반복 목표: 주 N회를 남은 요일에 고르게(되도록 하루씩 띄워) 배치
+  const plan = [];
+  const warnings = [];
+  let seq = 0;
+  for (const h of state.habits || []) {
+    const ws = toMin(h.windowStart);
+    const we = toMin(h.windowEnd);
+    const fits = d => free[d].some(([a, b]) => Math.min(b, we) - Math.max(a, ws) >= h.minutes);
+    const days = [];
+    for (const gap of [2, 1, 0]) {
+      for (let d = Math.max(0, today); d < 7 && days.length < h.perWeek; d++) {
+        if (days.includes(d) || !fits(d)) continue;
+        if (days.every(x => Math.abs(x - d) >= gap)) days.push(d);
+      }
+    }
+    for (const d of days.sort((a, b) => a - b)) {
+      const i = free[d].findIndex(([a, b]) => Math.min(b, we) - Math.max(a, ws) >= h.minutes);
+      const [a, b] = free[d][i];
+      const s = Math.max(a, ws);
+      plan.push({ id: `b${++seq}`, taskId: h.id, day: d, start: toHHMM(s), end: toHHMM(s + h.minutes), habit: true });
+      const rest = [];
+      if (s - a >= minBlock) rest.push([a, s - 10]);
+      if (b - (s + h.minutes + 10) >= minBlock) rest.push([s + h.minutes + 10, b]);
+      free[d].splice(i, 1, ...rest);
+    }
+    if (days.length < h.perWeek) {
+      const left = 7 - Math.max(0, today);
+      warnings.push(`'${h.title}' 주 ${h.perWeek}회 중 ${days.length}회만 넣을 수 있었어요${left < h.perWeek ? ` (이번 주 남은 날 ${left}일)` : ''}.`);
+    }
+  }
+
   // 2) 과제를 실질 마감(목표일과 실제 마감 중 이른 것) 순으로 정렬
   const tasks = state.tasks
     .filter(t => !t.done)
@@ -152,10 +183,6 @@ export function schedule(state, { weekStart, now }) {
       return { t, eff, due };
     })
     .sort((a, b) => a.eff.day - b.eff.day || a.eff.minute - b.eff.minute);
-
-  const plan = [];
-  const warnings = [];
-  let seq = 0;
 
   for (const { t, eff } of tasks) {
     let remaining = Math.round(t.hours * 60);
@@ -210,17 +237,18 @@ export function schedule(state, { weekStart, now }) {
   }
 
   plan.sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start));
-  return { plan, commutes, warnings, today: { day: today, capMin: today >= 0 && today <= 6 ? capOf(today) : null, effect, recorded: !!cond } };
+  const spareMin = free.reduce((acc, iv) => acc + iv.reduce((x, [a, b]) => x + (b - a), 0), 0);
+  return { plan, commutes, warnings, spareMin, today: { day: today, capMin: today >= 0 && today <= 6 ? capOf(today) : null, effect, recorded: !!cond } };
 }
 
 // 두 계획의 차이를 사람이 읽을 수 있게
-export function diffPlans(oldPlan, newPlan, tasks) {
+export function diffPlans(oldPlan, newPlan, tasks, habits = []) {
   const key = b => `${b.taskId}|${b.day}|${b.start}|${b.end}`;
   const oldSet = new Set(oldPlan.map(key));
   const newSet = new Set(newPlan.map(key));
   const added = newPlan.filter(b => !oldSet.has(key(b)));
   const removed = oldPlan.filter(b => !newSet.has(key(b)));
-  const title = id => (tasks.find(t => t.id === id) || {}).title || '과제';
+  const title = id => (tasks.find(t => t.id === id) || habits.find(h => h.id === id) || {}).title || '과제';
   const lines = [];
   for (const b of removed.slice(0, 4)) lines.push(`− ${DAY_NAMES[b.day]} ${b.start}–${b.end} ${title(b.taskId)}`);
   for (const b of added.slice(0, 4)) lines.push(`+ ${DAY_NAMES[b.day]} ${b.start}–${b.end} ${title(b.taskId)}`);

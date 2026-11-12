@@ -3,6 +3,23 @@ import { DAY_NAMES, dateOfDay, toMin, localDateKey } from './scheduler.js';
 
 export const PALETTE = ['#4f7cff', '#ff8a3d', '#22b07d', '#c25cf2', '#e5484d', '#0fa3b1', '#d4a017', '#6b7a99'];
 
+// 생활 일정 종류: 학교 밖 일정도 같은 계획표에서 다룬다
+export const EVENT_KINDS = {
+  알바: { color: '#ff8a3d', bg: '#ffe9d6', ink: '#9a4a0b' },
+  대외활동: { color: '#8b5cf6', bg: '#efe7ff', ink: '#5b2bb5' },
+  운동: { color: '#16a34a', bg: '#dcf5e4', ink: '#146c34' },
+  기타: { color: '#64748b', bg: '#e9edf3', ink: '#3c4656' },
+};
+export function kindOf(title = '') {
+  if (/알바|아르바이트|근무|과외|편의점|카페 ?근무/.test(title)) return '알바';
+  if (/헬스|운동|러닝|달리기|요가|수영|필라테스|축구|농구|클라이밍|PT|산책/.test(title)) return '운동';
+  if (/동아리|서포터즈|대외|공모전|봉사|학회|스터디|해커톤|기자단|인턴|멘토|프로젝트/.test(title)) return '대외활동';
+  return '기타';
+}
+
+// 희망 분야(대외활동 추천용)
+export const INTEREST_FIELDS = ['AI·데이터', '개발', '창업', '마케팅', '디자인', '기획', '금융', '환경·ESG', '봉사', '글로벌', '취업'];
+
 let idSeq = Date.now() % 100000;
 export const newId = prefix => `${prefix}${(++idSeq).toString(36)}`;
 
@@ -40,10 +57,17 @@ export function demoState(now = new Date()) {
       { id: 'c9', title: '영어회화', day: 4, start: '10:00', end: '12:00' },
     ],
     events: [
-      { id: 'e1', title: '카페 알바', day: 1, start: '18:00', end: '22:00' },
-      { id: 'e2', title: '카페 알바', day: 5, start: '12:00', end: '18:00' },
-      { id: 'e3', title: '동아리 모임', day: 3, start: '19:00', end: '21:00' },
+      { id: 'e1', title: '카페 알바', kind: '알바', day: 1, start: '18:00', end: '22:00' },
+      { id: 'e2', title: '카페 알바', kind: '알바', day: 5, start: '12:00', end: '18:00' },
+      { id: 'e3', title: 'AI 학회 정기 세션', kind: '대외활동', day: 3, start: '19:00', end: '21:00' },
     ],
+    // 운동 목표: 시각을 고정하지 않고 주 N회만 정하면 빈 시간에 배치
+    habits: [
+      { id: 'h1', title: '헬스', kind: '운동', perWeek: 3, minutes: 60, windowStart: '17:00', windowEnd: '22:00' },
+    ],
+    interests: ['AI·데이터', '창업'],
+    modules: ['study', 'alba', 'exercise', 'health', 'commute', 'activities'],
+    saved: [],
     blocked: [],
     tasks: [
       { id: 't1', title: '자료구조 과제3 (해시테이블 구현)', course: '자료구조', due: rel(2, '23:59'), hours: 5 },
@@ -58,7 +82,7 @@ export function demoState(now = new Date()) {
 }
 
 export function emptyState() {
-  return { courses: {}, classes: [], events: [], blocked: [], tasks: [], prefs: defaultPrefs(), condition: null };
+  return { courses: {}, classes: [], events: [], blocked: [], tasks: [], habits: [], interests: [], saved: [], modules: ['study'], prefs: defaultPrefs(), condition: null };
 }
 
 export function colorFor(state, course) {
@@ -93,8 +117,9 @@ export function applyOp(state, op) {
   switch (op.type) {
     case 'add_event': {
       checkRange(op.day, op.start, op.end);
-      state.events.push({ id: newId('e'), title: op.title || '개인 일정', day: op.day, start: normTime(op.start), end: normTime(op.end) });
-      return `${dayLabel(op.day)} ${normTime(op.start)}–${normTime(op.end)} '${op.title || '개인 일정'}' 추가`;
+      const kind = EVENT_KINDS[op.kind] ? op.kind : kindOf(op.title);
+      state.events.push({ id: newId('e'), title: op.title || '개인 일정', kind, day: op.day, start: normTime(op.start), end: normTime(op.end) });
+      return `${dayLabel(op.day)} ${normTime(op.start)}–${normTime(op.end)} '${op.title || '개인 일정'}'(${kind}) 추가`;
     }
     case 'block_time': {
       checkRange(op.day, op.start, op.end);
@@ -102,7 +127,7 @@ export function applyOp(state, op) {
       return `${dayLabel(op.day)} ${normTime(op.start)}–${normTime(op.end)} 비워둠`;
     }
     case 'remove_item': {
-      for (const key of ['events', 'blocked', 'tasks', 'classes']) {
+      for (const key of ['events', 'blocked', 'tasks', 'classes', 'habits']) {
         const i = state[key].findIndex(x => x.id === op.id);
         if (i >= 0) {
           const [x] = state[key].splice(i, 1);
@@ -168,6 +193,27 @@ export function applyOp(state, op) {
       if (!parts.length) throw new Error('바꿀 통학 정보가 없어요.');
       return `통학 설정: ${parts.join(', ')}${p.commuteMode === '자차' ? ' (운전 중엔 학습 블록을 넣지 않아요)' : ''}`;
     }
+    case 'set_habit': {
+      // 운동 등 반복 목표: 같은 이름이 있으면 고친다
+      state.habits = state.habits || [];
+      const title = op.title || '운동';
+      let h = state.habits.find(x => x.title === title);
+      if (!h) { h = { id: newId('h'), title, kind: '운동', perWeek: 3, minutes: 60, windowStart: '17:00', windowEnd: '22:00' }; state.habits.push(h); }
+      if (op.kind) h.kind = op.kind;
+      else if (/영어|단어|토익|어학|일본어|중국어|회화/.test(title)) h.kind = '어학';
+      if (op.per_week != null) h.perWeek = Math.min(7, Math.max(0, Math.round(op.per_week)));
+      if (op.minutes != null) h.minutes = Math.min(240, Math.max(15, Math.round(op.minutes / 15) * 15));
+      if (op.window_start && okTime(op.window_start)) h.windowStart = normTime(op.window_start);
+      if (op.window_end && okTime(op.window_end)) h.windowEnd = normTime(op.window_end);
+      if (h.perWeek === 0) { state.habits = state.habits.filter(x => x !== h); return `'${title}' 목표 삭제`; }
+      return `'${h.title}' 주 ${h.perWeek}회 × ${h.minutes}분 (${h.windowStart}–${h.windowEnd} 사이)`;
+    }
+    case 'set_interests': {
+      const fields = (op.fields || []).map(f => INTEREST_FIELDS.find(x => x.replace(/[·\s]/g, '').toLowerCase().includes(String(f).replace(/[·\s]/g, '').toLowerCase())) || null).filter(Boolean);
+      if (!fields.length) throw new Error(`분야는 ${INTEREST_FIELDS.join(', ')} 중에서 골라주세요.`);
+      state.interests = op.mode === 'add' ? [...new Set([...(state.interests || []), ...fields])] : [...new Set(fields)];
+      return `희망 분야: ${state.interests.join(', ')}`;
+    }
     default:
       throw new Error(`알 수 없는 연산: ${op.type}`);
   }
@@ -186,6 +232,8 @@ export function summarizeForLLM(state, weekStart, now) {
     now: localISO(now),
     classes: state.classes.map(({ id, title, day, start, end }) => ({ id, title, day, start, end })),
     events: state.events,
+    habits: state.habits || [],
+    interests: state.interests || [],
     blocked: state.blocked,
     tasks: state.tasks.map(({ id, title, course, due, hours, goalDay, done }) => ({ id, title, course, due, hours, goalDay, done })),
     prefs: state.prefs,

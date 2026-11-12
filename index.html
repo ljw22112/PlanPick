@@ -21,6 +21,7 @@
     <div class="week" id="weekLabel"></div>
     <div class="top-actions">
       <span class="mode" id="modeBadge"></span>
+      <button class="ghost" id="btnInterests">관심사</button>
       <button class="ghost" id="btnDemo">데모 데이터</button>
       <button class="ghost" id="btnClear">비우기</button>
       <button class="ghost" id="btnSettings">설정</button>
@@ -33,7 +34,8 @@
       <nav class="tabs" role="tablist">
         <button class="tab active" data-tab="tasks">과제</button>
         <button class="tab" data-tab="classes">수업</button>
-        <button class="tab" data-tab="events">개인일정</button>
+        <button class="tab" data-tab="events">생활</button>
+        <button class="tab" data-tab="recs" id="recsTab">추천<span class="badge" id="recBadge"></span></button>
         <button class="tab" data-tab="import">가져오기</button>
       </nav>
 
@@ -64,9 +66,27 @@
       </section>
 
       <section class="tabpane" id="tab-events">
+        <h3 class="sec">반복 목표 <small>시각 대신 횟수만 정하면 빈 시간에 배치</small></h3>
+        <ul class="items" id="habitList"></ul>
+        <form class="mini-form" id="habitForm">
+          <div class="row">
+            <input name="title" placeholder="예: 헬스, 영어 단어" required />
+            <select name="perWeek" title="주 몇 회"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select>
+          </div>
+          <div class="row">
+            <input name="minutes" type="number" min="15" max="240" step="15" value="60" title="1회 분" />
+            <input name="windowStart" type="time" value="17:00" title="이 시각부터" />
+            <input name="windowEnd" type="time" value="22:00" title="이 시각까지" />
+          </div>
+          <button type="submit">목표 추가 (주 N회 × 분)</button>
+        </form>
+        <h3 class="sec">고정 일정 <small>알바·대외활동·운동 등</small></h3>
         <ul class="items" id="eventList"></ul>
         <form class="mini-form" id="eventForm">
-          <input name="title" placeholder="일정 (예: 알바)" required />
+          <div class="row">
+            <input name="title" placeholder="일정 (예: 편의점 알바)" required />
+            <select name="kind"><option value="">종류 자동</option><option>알바</option><option>대외활동</option><option>운동</option><option>기타</option></select>
+          </div>
           <div class="row">
             <select name="day"></select>
             <input name="start" type="time" value="18:00" required />
@@ -74,6 +94,15 @@
           </div>
           <button type="submit">일정 추가</button>
         </form>
+      </section>
+
+      <section class="tabpane" id="tab-recs">
+        <div class="interest-box">
+          <div class="ib-head"><b>희망 분야</b><button class="ghost small" id="btnNewPost" title="새 공고가 올라온 상황을 시연">새 공고 도착 (시연)</button></div>
+          <div class="ichips" id="interestChips"></div>
+        </div>
+        <p class="hint">분야가 맞고, 내 시간표와 겹치지 않고, 지원서 준비 시간이 마감 전에 들어가는 공고를 위로 올려요. 데모 공고는 모두 가상이에요.</p>
+        <div class="recs" id="recList"></div>
       </section>
 
       <section class="tabpane" id="tab-import">
@@ -102,7 +131,9 @@
         <div class="stats" id="stats"></div>
         <div class="legend">
           <span><i class="sw class"></i>수업</span>
-          <span><i class="sw event"></i>개인일정</span>
+          <span><i class="sw alba"></i>알바</span>
+          <span><i class="sw act"></i>대외활동</span>
+          <span><i class="sw ex"></i>운동·어학</span>
           <span><i class="sw study"></i>공부 블록</span>
           <span><i class="sw blocked"></i>비워둠</span>
           <span><i class="sw commute"></i>통학·이동 중 학습</span>
@@ -168,6 +199,22 @@
       </div>
     </form>
   </dialog>
+
+  <div class="onboard" id="onboard" hidden>
+    <div class="ob-inner">
+      <header class="ob-head">
+        <div class="logo">P</div>
+        <h2>무엇에 관심 있나요?</h2>
+        <p>3개 이상 고르면 계획표와 추천이 맞춤으로 바뀌어요. 나중에 '관심사'에서 다시 고를 수 있어요.</p>
+      </header>
+      <div class="masonry" id="obGrid"></div>
+    </div>
+    <div class="ob-bar">
+      <span id="obCount">0개 선택</span>
+      <button id="obSkip" class="ghost">건너뛰기</button>
+      <button id="obDone" disabled>내 계획표 만들기</button>
+    </div>
+  </div>
 
   <div class="toast" id="toast" role="status"></div>
   <script type="module" src="js/app.js"></script>

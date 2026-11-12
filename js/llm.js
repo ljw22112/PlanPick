@@ -10,8 +10,8 @@ const dayProp = { type: 'integer', minimum: 0, maximum: 6, description: '0=월 1
 export const TOOLS = [
   {
     name: 'add_event',
-    description: '이번 주에 개인 일정(알바, 약속, 동아리 등)을 추가한다. 공부 블록은 이 시간을 피해 다시 배치된다.',
-    input_schema: { type: 'object', properties: { day: dayProp, start: timeProp, end: timeProp, title: { type: 'string' } }, required: ['day', 'start', 'end', 'title'] },
+    description: '이번 주에 고정 일정(알바, 대외활동, 운동 수업, 약속 등)을 추가한다. 공부 블록은 이 시간을 피해 다시 배치된다.',
+    input_schema: { type: 'object', properties: { day: dayProp, start: timeProp, end: timeProp, title: { type: 'string' }, kind: { type: 'string', enum: ['알바', '대외활동', '운동', '기타'] } }, required: ['day', 'start', 'end', 'title'] },
   },
   {
     name: 'block_time',
@@ -52,6 +52,16 @@ export const TOOLS = [
     name: 'set_commute',
     description: '[모빌리티 융합] 편도 통학 시간(분)과 수단(지하철·버스·자차·도보)을 바꾼다. 대중교통이면 통학 시간에 퀴즈·암기·복습처럼 가벼운 과제를 "이동 중 학습"으로 배치하고, 자차면 넣지 않는다.',
     input_schema: { type: 'object', properties: { minutes: { type: 'integer', minimum: 0 }, mode: { type: 'string', enum: ['지하철', '버스', '자차', '도보'] } } },
+  },
+  {
+    name: 'set_habit',
+    description: '운동·어학처럼 시각 대신 "주 N회 × M분"만 정하는 반복 목표를 만들거나 고친다. 같은 title이 있으면 수정, per_week 0이면 삭제. window는 배치 가능한 시간대.',
+    input_schema: { type: 'object', properties: { title: { type: 'string' }, per_week: { type: 'integer', minimum: 0, maximum: 7 }, minutes: { type: 'integer' }, window_start: timeProp, window_end: timeProp, kind: { type: 'string', enum: ['운동', '어학'] } }, required: ['title'] },
+  },
+  {
+    name: 'set_interests',
+    description: '대외활동 추천에 쓰는 희망 분야를 정한다. 분야: AI·데이터, 개발, 창업, 마케팅, 디자인, 기획, 금융, 환경·ESG, 봉사, 글로벌, 취업. mode add면 기존에 추가.',
+    input_schema: { type: 'object', properties: { fields: { type: 'array', items: { type: 'string' } }, mode: { type: 'string', enum: ['set', 'add'] } }, required: ['fields'] },
   },
 ];
 
