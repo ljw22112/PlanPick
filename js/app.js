@@ -19,7 +19,7 @@ const STORE = 'planpick:v3';
 const DEFAULT_MODEL = 'claude-haiku-5-5';
 
 const $ = s => document.querySelector(s);
-const now = new Date();
+let now = new Date();
 const weekStart = weekStartOf(now);
 const today = (now.getDay() + 6) % 7;
 
@@ -81,6 +81,8 @@ const habitOf = (s, id) => (s.habits || []).find(h => h.id === id);
 
 // ---------- 계산 ----------
 function recompute() {
+  const fresh = new Date();
+  if (weekStartOf(fresh).getTime() === weekStart.getTime()) now = fresh; // 열어둔 채 시간이 지나도 지난 시간에 배치하지 않게
   const r = schedule(state, { weekStart, now });
   sched = r;
   plan = r.plan;
@@ -123,6 +125,88 @@ function render() {
   renderNow();
   renderFixOpts();
   renderLedger();
+  renderSimple();
+}
+
+// ---------- 간단 모드: 지금 할 일 하나 + 남은 예산 ----------
+const isLogged = b => (state.log || []).some(l => l.taskId === b.taskId && l.date === blockDate(b) && l.hour === Math.floor(toMin(b.start) / 60));
+function simpleTarget() {
+  const m = nowMin();
+  const todays = plan.filter(b => b.day === today).sort((a, b) => toMin(a.start) - toMin(b.start));
+  const cur = todays.find(b => toMin(b.start) <= m && toMin(b.end) > m);
+  if (cur) return { b: cur, kind: 'now' };
+  // 방금 끝났는데 기록이 없는 블록 → 원탭 기록을 먼저 묻는다
+  const ended = todays.filter(b => toMin(b.end) <= m && toMin(b.end) > m - 180 && !isLogged(b)).pop();
+  if (ended) return { b: ended, kind: 'ended' };
+  const next = todays.find(b => toMin(b.start) > m);
+  if (next) return { b: next, kind: 'next' };
+  return null;
+}
+function renderSimple() {
+  if ($('#simple').hidden || !sched) return;
+  const d = new Date();
+  const m = d.getHours() * 60 + d.getMinutes();
+  $('#smDate').textContent = `${d.getMonth() + 1}월 ${d.getDate()}일 ${DAY_NAMES[today]}요일 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const tg = simpleTarget();
+  const fixedNow = [...state.classes, ...state.events].filter(x => x.day === today && toMin(x.start) <= m && toMin(x.end) > m)[0];
+  let card;
+  if (!tg) {
+    card = `<div class="sm-lbl done">오늘 끝</div><div class="sm-title">오늘 계획한 블록을 다 지나왔어요</div><div class="sm-sub">수고했어요. 내일 계획은 이미 짜여 있어요.</div>`;
+  } else {
+    const { b, kind } = tg;
+    const len = toMin(b.end) - toMin(b.start);
+    const t = b.rest ? null : b.habit ? habitOf(state, b.taskId) : taskOf(state, b.taskId);
+    const cat = b.rest ? '휴식' : b.habit ? ((t || {}).kind === '어학' ? '자기계발' : '운동') : (t && t.course === '대외활동' ? '자기계발' : '공부');
+    const left = kind === 'now' ? toMin(b.end) - m : kind === 'next' ? toMin(b.start) - m : 0;
+    const lbl = { now: '지금', next: '다음', ended: '방금 끝남' }[kind];
+    const when = kind === 'now' ? `${left}분 남음` : kind === 'next' ? (left >= 60 ? `${Math.floor(left / 60)}시간 ${left % 60}분 뒤` : `${left}분 뒤`) + ' 시작' : '어땠어요?';
+    const pct = kind === 'now' ? Math.round(((m - toMin(b.start)) / len) * 100) : 0;
+    const acts = kind === 'ended' || kind === 'now'
+      ? `<div class="sm-acts3"><button data-sm="done" data-block="${b.id}">끝냈어요</button><button class="mid" data-sm="half" data-block="${b.id}">절반</button><button class="ghost" data-sm="skip" data-block="${b.id}">못 했어요</button></div>`
+      : '';
+    card = `<div class="sm-lbl ${kind}" style="--c:${CAT_COLORS[cat]}">${lbl} · ${cat}</div>
+      <div class="sm-title">${esc(blockTitle(b))}${b.mobile ? ' <small>(통학 중)</small>' : ''}</div>
+      <div class="sm-time">${b.start}–${b.end} · <b>${when}</b></div>
+      ${kind === 'now' ? `<div class="sm-prog"><i style="width:${pct}%;background:${CAT_COLORS[cat]}"></i></div>` : ''}
+      ${b.why && b.why.length ? `<div class="sm-sub">${esc(b.why.slice(0, 2).join(' · '))}</div>` : ''}
+      ${fixedNow ? `<div class="sm-sub">지금은 고정 일정 '${esc(fixedNow.title)}' 중이에요.</div>` : ''}
+      ${!b.rest && kind !== 'ended' ? `<button class="sm-big" data-sm="focus" data-block="${b.id}">집중 시작 (${len}분)</button>` : ''}
+      ${acts}`;
+  }
+  $('#smCard').innerHTML = card;
+  const rest = plan.filter(b => b.day === today && toMin(b.end) > m && (!tg || b.id !== tg.b.id)).sort((a, b) => toMin(a.start) - toMin(b.start));
+  const fixed = [...state.classes, ...state.events].filter(x => x.day === today && toMin(x.end) > m).map(x => ({ start: x.start, end: x.end, title: x.title, fixed: true }));
+  const items = [...rest.map(b => ({ start: b.start, end: b.end, title: blockTitle(b) + (b.mobile ? ' (통학 중)' : '') })), ...fixed].sort((a, b) => toMin(a.start) - toMin(b.start));
+  $('#smList').innerHTML = items.length ? items.slice(0, 6).map(x => `<li class="${x.fixed ? 'fx' : ''}"><span>${x.start}</span>${esc(x.title)}${x.fixed ? '<em>고정</em>' : ''}</li>`).join('') : '<li class="muted">남은 일정이 없어요</li>';
+  const v = ledgerView(state, sched, weekStart);
+  const h = x => (x / 60).toFixed(1).replace(/\.0$/, '');
+  $('#smBudget').innerHTML = v.rows.map(r => `<div class="sm-b"><span><i style="background:${r.color}"></i>${r.cat}</span><div class="lg-bar"><i class="sp2" style="width:${Math.min(100, (r.spent / Math.max(1, r.target)) * 100)}%;background:${r.color}"></i></div><b>${h(r.left)}h</b></div>`).join('');
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  $('#smInstall').hidden = standalone || !installEvt;
+  $('#smHint').textContent = standalone ? '' : installEvt ? '' : /iPhone|iPad/.test(navigator.userAgent) ? '아이폰: 공유 버튼 → "홈 화면에 추가"로 앱처럼 쓸 수 있어요.' : '브라우저 메뉴의 "앱 설치" 또는 "홈 화면에 추가"로 앱처럼 쓸 수 있어요.';
+}
+let installEvt = null;
+function openSimple() { $('#simple').hidden = false; document.body.classList.add('simple-on'); app.simple = true; save(); renderSimple(); }
+function closeSimple() { if (location.search.includes('mode=now')) history.replaceState(null, '', location.pathname); $('#simple').hidden = true; document.body.classList.remove('simple-on'); app.simple = false; save(); render(); }
+function bindSimple() {
+  $('#btnSimple').addEventListener('click', openSimple);
+  $('#smFull').addEventListener('click', closeSimple);
+  $('#simple').addEventListener('click', e => {
+    const a = e.target.closest('[data-sm]');
+    if (!a) return;
+    const b = plan.find(x => x.id === a.dataset.block);
+    if (!b) return;
+    const len = toMin(b.end) - toMin(b.start);
+    if (a.dataset.sm === 'focus') startFocus(b);
+    if (a.dataset.sm === 'done') logBlock(b, len, true);
+    if (a.dataset.sm === 'half') logBlock(b, Math.round(len / 20) * 10, true);
+    if (a.dataset.sm === 'skip') logBlock(b, 0, false);
+    if (a.dataset.sm !== 'focus') { const el = document.createElement('div'); el.className = 'sm-toast'; el.textContent = '기록했어요 · 계획을 다시 맞췄어요'; $('#simple').appendChild(el); setTimeout(() => el.remove(), 1800); }
+  });
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; renderSimple(); });
+  $('#smInstall').addEventListener('click', async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; renderSimple(); });
+  setInterval(renderSimple, 30000);
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
 // 시간 가계부 스트립: 남는 시간 예산 대비 계획·사용
@@ -1290,6 +1374,7 @@ function closeOnboarding(apply) {
 fillDaySelects();
 bind();
 bindExtras();
+bindSimple();
 $('#obDone').addEventListener('click', () => closeOnboarding(true));
 $('#obSkip').addEventListener('click', () => closeOnboarding(false));
 const prevPlan = app.lastPlan;
@@ -1298,13 +1383,17 @@ renderChips();
 const tdue = new Date(now.getTime() + 3 * 86400000);
 tdue.setHours(23, 59, 0, 0);
 $('#taskForm').elements.due.value = localISO(tdue);
+const qs = new URLSearchParams(location.search);
+const narrowApp = window.matchMedia('(max-width: 760px)').matches && (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone);
+if (app.onboarded && (qs.get('mode') === 'now' || app.simple || narrowApp)) openSimple();
+if (qs.get('open') === 'ledger' && app.onboarded) openLedger();
 if (!app.onboarded) openOnboarding(false);
 else {
   addBot(`다시 오셨네요! 이번 주 계획을 최신 상태로 다시 짰어요.\n${helpText()}`);
   const missed = app.proactive !== 'off' && missedSince(prevPlan, state, { weekStart, now });
   if (missed) addBot(`지난번 이후 기록 없이 지나간 블록 ${missed.count}개(${Math.round(missed.min / 6) / 10}시간)를 남은 빈 시간에 다시 배치했어요. 괜찮아요, 계획은 원래 깨지는 거예요.`, missed.titles);
   const bk = `${localDateKey(now)}|${now.getHours() >= 20 ? 'evening' : now.getHours() < 12 ? 'morning' : 'day'}`;
-  if (app.proactive !== 'off' && app.lastBriefing !== bk && (now.getHours() < 12 || now.getHours() >= 20)) openBriefing(true);
+  if (app.proactive !== 'off' && app.lastBriefing !== bk && $('#simple').hidden && (now.getHours() < 12 || now.getHours() >= 20)) openBriefing(true);
   const fresh = hasMod('activities') ? recommend(state, feed(), { weekStart, now }).filter(r => r.opp.posted === 0) : [];
   if (fresh.length) addBot(`희망 분야 새 공고 ${fresh.length}건이 올라왔어요.`, fresh.map(r => `${r.opp.title} · ${r.score}점 · D-${r.daysLeft}`));
 }

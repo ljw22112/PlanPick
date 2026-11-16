@@ -1,0 +1,20 @@
+{
+  "name": "플랜픽 · 대학생 시간 가계부",
+  "short_name": "플랜픽",
+  "description": "고정 일정은 지키고 남는 시간을 예산처럼 쓰는 대학생 AI 플래너",
+  "start_url": "./?src=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f6fa",
+  "theme_color": "#3b5bfd",
+  "lang": "ko",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "지금 할 일", "url": "./?mode=now", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "시간 가계부", "url": "./?open=ledger", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

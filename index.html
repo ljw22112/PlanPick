@@ -7,6 +7,11 @@
   <meta name="description" content="시간표·LMS 과제·개인일정을 모아 AI가 주간 공부 계획을 짜고, 대화로 고치는 대학생 플래너 데모" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#3b5bfd" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="플랜픽" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%233b5bfd%22/%3E%3Ctext x=%2216%22 y=%2223%22 font-size=%2218%22 font-weight=%22800%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22%3EP%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
@@ -22,7 +27,8 @@
     <div class="top-actions">
       <span class="mode" id="modeBadge"></span>
       <button class="ghost" id="btnBrief">브리핑</button>
-      <button class="ghost" id="btnLedger">가계부</button>
+      <button class="ghost" id="btnSimple" title="지금 할 일만 크게 보는 모드">간단 모드</button>
+        <button class="ghost" id="btnLedger">가계부</button>
         <button class="ghost" id="btnReport">리포트</button>
       <button class="ghost" id="btnTeam">팀플</button>
       <button class="ghost" id="btnInterests">관심사</button>
@@ -268,6 +274,15 @@
   </div>
 
   <dialog id="modal"><div class="modal-body" id="modalBody"></div></dialog>
+
+  <!-- 간단 모드: 지금 할 일 + 남은 예산만 -->
+  <div class="simple" id="simple" hidden>
+    <div class="sm-top"><div class="logo">P</div><div><b>지금 할 일</b><small id="smDate"></small></div><span class="sp"></span><button class="ghost small" id="smInstall" hidden>홈 화면에 추가</button><button class="ghost small" id="smFull">전체 보기</button></div>
+    <div class="sm-card" id="smCard"></div>
+    <div class="sm-sec"><h3>오늘 남은 일정</h3><ul id="smList"></ul></div>
+    <div class="sm-sec"><h3>이번 주 남은 예산</h3><div id="smBudget"></div></div>
+    <p class="sm-hint" id="smHint"></p>
+  </div>
 
   <div class="focus" id="focus" hidden>
     <div class="focus-in">
