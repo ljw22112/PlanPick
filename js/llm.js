@@ -74,6 +74,16 @@ export const TOOLS = [
     input_schema: { type: 'object', properties: { minutes: { type: 'integer', minimum: 0 } }, required: ['minutes'] },
   },
   {
+    name: 'set_budget',
+    description: '[시간 가계부] 고정 일정을 뺀 남는 시간을 공부·운동·자기계발·휴식에 몇 %씩 쓸지 정한다. 일부만 주면 나머지는 기존 비율대로 맞춰 합 100이 된다. "놀기·쉬는 시간"은 휴식.',
+    input_schema: { type: 'object', properties: { 공부: { type: 'integer' }, 운동: { type: 'integer' }, 자기계발: { type: 'integer' }, 휴식: { type: 'integer' } } },
+  },
+  {
+    name: 'set_buffer',
+    description: '[여유 버퍼] 마감보다 얼마나 일찍 끝내게 계획할지. off=마감 맞춤, normal=어려운 과제·내가 오래 걸리는 과목만 12시간 여유, safe=모든 과제 하루 전 완료.',
+    input_schema: { type: 'object', properties: { mode: { type: 'string', enum: ['off', 'normal', 'safe'] } }, required: ['mode'] },
+  },
+  {
     name: 'set_interests',
     description: '대외활동 추천에 쓰는 희망 분야를 정한다. 분야: AI·데이터, 개발, 창업, 마케팅, 디자인, 기획, 금융, 환경·ESG, 봉사, 글로벌, 취업. mode add면 기존에 추가.',
     input_schema: { type: 'object', properties: { fields: { type: 'array', items: { type: 'string' } }, mode: { type: 'string', enum: ['set', 'add'] } }, required: ['fields'] },
@@ -89,6 +99,8 @@ function systemPrompt(state, weekStart, now) {
 - 과제는 이름·과목으로 tasks에서 찾아 id를 쓴다. 애매하면 도구를 부르지 말고 짧게 되묻는다.
 - 필요한 만큼 여러 도구를 한 번에 호출해도 된다.
 - 피곤·수면 부족·스트레스 이야기는 set_condition, 통학 시간·수단 이야기는 set_commute, 지하철 지연은 set_commute_delay로 반영한다.
+- 고정 일정(수업·통학·알바·약속)은 사용자가 직접 말하지 않는 한 절대 옮기거나 지우지 않는다. 바꾸는 건 남는 시간의 배분뿐이다.
+- "공부 60%, 운동 20%"·"놀 시간 더 줘" 같은 시간 배분은 set_budget, "여유 있게/빠듯하게 짜줘"는 set_buffer.
 - "만약 ~하면?" 같은 가정 질문도 도구를 호출해라. 앱이 적용 전 미리보기로 보여준다.
 - "왜 이 시간이야?"처럼 배치 이유를 물으면 도구를 부르지 말고, 마감·컨디션·통학·집중 시간대 관점에서 짧게 설명해라.
 - 도구를 다 부른 뒤 무엇을 바꿨는지 한두 문장 반말이 아닌 친근한 존댓말로 요약한다. 일정과 무관한 질문엔 짧게 답한다.

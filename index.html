@@ -22,7 +22,8 @@
     <div class="top-actions">
       <span class="mode" id="modeBadge"></span>
       <button class="ghost" id="btnBrief">브리핑</button>
-      <button class="ghost" id="btnReport">리포트</button>
+      <button class="ghost" id="btnLedger">가계부</button>
+        <button class="ghost" id="btnReport">리포트</button>
       <button class="ghost" id="btnTeam">팀플</button>
       <button class="ghost" id="btnInterests">관심사</button>
       <button class="ghost" id="btnDemo">데모 데이터</button>
@@ -169,10 +170,12 @@
           <span><i class="sw act"></i>대외활동</span>
           <span><i class="sw ex"></i>운동·어학</span>
           <span><i class="sw study"></i>공부 블록</span>
+          <span><i class="sw rest"></i>휴식(예산)</span>
           <span><i class="sw blocked"></i>비워둠</span>
           <span><i class="sw commute"></i>통학·이동 중 학습</span>
         </div>
       </div>
+      <div class="ledger" id="ledgerStrip"></div>
       <div class="nowcard" id="nowCard"></div>
       <div class="condbar" id="condBar">
         <span class="cond-title">오늘 컨디션</span>
@@ -183,6 +186,7 @@
           </select>
         </label>
         <button class="ghost small" id="btnWearable" title="실제 서비스에서는 Health Connect·HealthKit 연동">웨어러블 불러오기</button>
+        <button class="ghost small" id="btnRoute" title="계획과 연결된 통학 경로 추천(시연)">통학 경로 AI</button>
         <button class="ghost small" id="btnDelay" title="실제 서비스에서는 실시간 교통 정보 연동">지하철 지연 +15분(시연)</button>
         <span class="cond-effect" id="condEffect"></span>
       </div>

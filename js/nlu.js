@@ -87,6 +87,17 @@ export function parseKorean(text, state, today) {
   if (/리포트|주간 ?통계|이번 ?주 어땠/.test(t)) return { special: 'report' };
   if (/팀플.*(시간|맞춰|언제)|공통.*빈 ?시간|회의 시간/.test(t)) return { special: 'team' };
   if (/공강/.test(t)) return { special: 'gaps' };
+  if (/가계부|시간 ?예산|예산 ?(보여|확인)|얼마나 ?썼/.test(t) && !/%|퍼센트/.test(t) && !/추천|제안/.test(t)) return { special: 'ledger' };
+  if (/(비율|예산).*(추천|제안|짜줘|정해줘)|(추천|제안).*(비율|예산)/.test(t)) return { special: 'suggest_budget' };
+  if (/경로|출발 ?시간|몇 ?시에 ?나가|어떻게 ?가/.test(t) && !/만약/.test(t)) return { special: 'route' };
+  {
+    const op = { type: 'set_budget' };
+    const al = { 공부: '공부', 운동: '운동', 자기계발: '자기계발', 성장: '자기계발', 어학: '자기계발', 휴식: '휴식', 놀기: '휴식', 쉬는: '휴식', 여가: '휴식' };
+    for (const m of t.matchAll(/(공부|운동|자기계발|성장|어학|휴식|놀기|쉬는|여가)[^\d%]{0,6}(\d{1,2})\s*(?:%|퍼센트|프로)/g)) op[al[m[1]]] = Number(m[2]);
+    if (Object.keys(op).length > 1) return { ops: [op] };
+  }
+  if (/여유 ?있게|넉넉하게|미리 ?끝내|하루 ?전에/.test(t) && !/만약/.test(t)) return { ops: [{ type: 'set_buffer', mode: 'safe' }] };
+  if (/빠듯하게|마감에 ?맞춰|여유 ?없이/.test(t)) return { ops: [{ type: 'set_buffer', mode: 'off' }] };
   const why = t.match(/(.*?)(왜 (?:이|그) ?시간|왜 여기|왜 거기|이유)/);
   if (why && /왜|이유/.test(t)) return { special: 'explain', query: why[1].replace(/[은는이가을를]\s*$/, '').trim() };
 

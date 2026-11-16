@@ -9,6 +9,7 @@ import { weeklyReport } from './report.js';
 import { SHIFT_PROMPT, extractWithLLM, startHelper } from './llm.js';
 import { parseICSEvents } from './ics.js';
 import { parseKorean } from './nlu.js';
+import { ledgerView, suggestBudget, routeOptions, CAT_COLORS } from './ledger.js';
 import { runLLM, readTimetableImage } from './llm.js';
 import { parseICS, SAMPLE_ICS } from './ics.js';
 
@@ -121,6 +122,139 @@ function render() {
   renderRecs();
   renderNow();
   renderFixOpts();
+  renderLedger();
+}
+
+// 시간 가계부 스트립: 남는 시간 예산 대비 계획·사용
+function renderLedger() {
+  const s = preview ? preview.draft : state;
+  const sc = preview ? preview.sched : sched;
+  if (!sc || !sc.ledger) return;
+  const v = ledgerView(s, sc, weekStart);
+  const h = m => (m / 60).toFixed(1).replace(/\.0$/, '');
+  $('#ledgerStrip').innerHTML = `<button class="lg-head" data-lg="open" title="시간 가계부 열기"><b>시간 가계부</b><span>남는 시간 ${h(v.baseMin)}h</span></button>` +
+    v.rows.map(r => {
+      const pl = Math.min(100, (r.planned / Math.max(1, r.target)) * 100);
+      const sp = Math.min(100, (r.spent / Math.max(1, r.target)) * 100);
+      return `<div class="lg-cat" data-lg="open" title="${r.cat} 예산 ${r.pct}% = ${h(r.target)}시간 · 계획 ${h(r.planned)}h · 사용 ${h(r.spent)}h">
+        <div class="lg-l"><i style="background:${r.color}"></i>${r.cat} <small>${r.pct}%</small><span class="sp"></span><b>${h(r.spent)}</b><small>/${h(r.target)}h</small></div>
+        <div class="lg-bar"><i class="pl" style="width:${pl}%;background:${r.color}"></i><i class="sp2" style="width:${sp}%;background:${r.color}"></i></div></div>`;
+    }).join('');
+}
+
+function donut(rows, key) {
+  const total = rows.reduce((a, r) => a + r[key], 0) || 1;
+  let acc = 0;
+  const R = 52, C = 2 * Math.PI * R;
+  const segs = rows.map(r => {
+    const len = (r[key] / total) * C;
+    const el = `<circle r="${R}" cx="70" cy="70" fill="none" stroke="${r.color}" stroke-width="22" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-acc}" transform="rotate(-90 70 70)"><title>${r.cat} ${Math.round((r[key] / total) * 100)}%</title></circle>`;
+    acc += len;
+    return el;
+  }).join('');
+  return `<svg viewBox="0 0 140 140" width="140" height="140">${segs}</svg>`;
+}
+
+function openLedger() {
+  const v = ledgerView(state, sched, weekStart);
+  const sg = suggestBudget(state, sched, now);
+  const h = m => (m / 60).toFixed(1).replace(/\.0$/, '');
+  const totalSpent = v.rows.reduce((a, r) => a + r.spent, 0);
+  const totalPlanned = v.rows.reduce((a, r) => a + r.planned, 0);
+  const buf = state.prefs.buffer || 'normal';
+  const body = openModal(`
+    <h2>시간 가계부</h2>
+    <div class="muted">${$('#weekLabel').textContent} · 수업·통학·알바 같은 고정 일정은 잠겨 있고, 남는 시간 <b>${h(v.baseMin)}시간</b>을 예산처럼 나눠 써요.</div>
+    <div class="lg-top">
+      <div class="lg-donut">${donut(v.rows, 'target')}<div class="c"><b>${h(v.baseMin)}h</b><small>이번 주 예산</small></div></div>
+      <div class="lg-sum">
+        <div><small>계획</small><b>${h(totalPlanned)}h</b></div>
+        <div><small>사용(기록)</small><b>${h(totalSpent)}h</b></div>
+        <div><small>잔액</small><b>${h(Math.max(0, v.baseMin - totalSpent))}h</b></div>
+        <div><small>이동 중 학습(보너스)</small><b>${h(v.mobileMin)}h</b></div>
+      </div>
+    </div>
+    <table class="lg-table"><thead><tr><th>항목</th><th>예산</th><th>계획</th><th>사용</th><th>잔액</th><th></th></tr></thead><tbody>
+    ${v.rows.map(r => `<tr><td><i style="background:${r.color}"></i>${r.cat}</td>
+      <td><input type="number" min="0" max="90" step="5" value="${r.pct}" data-pct="${r.cat}" />% <small>${h(r.target)}h</small></td>
+      <td>${h(r.planned)}h</td><td><b>${h(r.spent)}h</b></td><td>${h(r.left)}h</td>
+      <td class="bar"><div class="lg-bar"><i class="pl" style="width:${Math.min(100, (r.planned / Math.max(1, r.target)) * 100)}%;background:${r.color}"></i><i class="sp2" style="width:${Math.min(100, (r.spent / Math.max(1, r.target)) * 100)}%;background:${r.color}"></i></div></td></tr>`).join('')}
+    </tbody></table>
+    <div class="acts" style="justify-content:flex-start"><button class="small" data-lg="save">비율 저장하고 다시 짜기</button><span class="muted" id="lgSum"></span></div>
+    <div class="ai-sug"><b>AI 비율 제안</b> ${BUDGET_LINE(sg.budget)}
+      <ul>${sg.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+      <button class="small" data-lg="ai">이 비율로 미리보기</button></div>
+    <h3>여유 버퍼 — 내가 지킬 수 있는 계획</h3>
+    <div class="seg">${[['off', '빠듯하게', '마감 시각에 맞춤'], ['normal', '보통', '어렵거나 내가 오래 걸리는 과목만 12시간 여유'], ['safe', '넉넉하게', '모든 과제를 하루 전 완료']].map(([k, a, b]) => `<button class="${buf === k ? 'on' : ''}" data-buf="${k}"><b>${a}</b><small>${b}</small></button>`).join('')}</div>
+    <h3>지출 내역</h3>
+    ${v.items.length ? `<ul class="lg-items">${v.items.slice(0, 8).map(l => `<li><i style="background:${CAT_COLORS[l.cat]}"></i>${esc(l.date.slice(5))} ${l.hour}시 · ${esc(l.cat)}${logTitle(l) !== l.cat ? ` · ${esc(logTitle(l))}` : ''}<span class="sp"></span>−${l.actual}분</li>`).join('')}</ul>` : '<p class="muted">아직 기록이 없어요. 블록을 눌러 "끝냈어요"를 남기면 여기에 쌓여요.</p>'}
+    <div class="acts"><button class="ghost" data-lg="demo">사용 기록 예시 채우기(시연)</button><button data-lg="close">닫기</button></div>`);
+  const sumCheck = () => {
+    const sum = [...body.querySelectorAll('[data-pct]')].reduce((a, i) => a + Number(i.value || 0), 0);
+    $('#lgSum').textContent = sum === 100 ? '합계 100%' : `합계 ${sum}% — 100%가 되어야 해요`;
+    return sum;
+  };
+  body.oninput = sumCheck;
+  sumCheck();
+  body.onclick = e => {
+    const lg = e.target.closest('[data-lg]')?.dataset.lg;
+    const bf = e.target.closest('[data-buf]')?.dataset.buf;
+    if (bf) { const s2 = clone(state); const m = applyOp(s2, { type: 'set_buffer', mode: bf }); commit(s2, m); openLedger(); return; }
+    if (lg === 'close') closeModal();
+    if (lg === 'save') {
+      if (sumCheck() !== 100) return;
+      const op = { type: 'set_budget' };
+      body.querySelectorAll('[data-pct]').forEach(i => { op[i.dataset.pct] = Number(i.value); });
+      const s2 = clone(state); const m = applyOp(s2, op); commit(s2, m); openLedger();
+    }
+    if (lg === 'ai') {
+      closeModal();
+      const draft = clone(state);
+      const m = applyOp(draft, { type: 'set_budget', ...sg.budget });
+      addBot(`이번 주 상황을 보고 비율을 다시 나눠봤어요.\n${sg.reasons.map(x => `· ${x}`).join('\n')}`);
+      showPreview(draft, '', [m]);
+    }
+    if (lg === 'demo') {
+      const s2 = clone(state);
+      const pick = (pred, n) => plan.filter(pred).slice(0, n);
+      const blocks = [...pick(b => !b.habit && !b.rest && !b.mobile && b.day <= Math.max(today, 2), 4), ...pick(b => b.habit, 2), ...pick(b => b.rest, 2)];
+      for (const b of blocks) {
+        const len = toMin(b.end) - toMin(b.start);
+        const actual = b.rest ? len : Math.round((len * (0.7 + Math.random() * 0.5)) / 10) * 10;
+        const t = taskOf(s2, b.taskId);
+        s2.log = [...(s2.log || []), { taskId: b.taskId, course: t ? t.course : b.rest ? '휴식' : (habitOf(s2, b.taskId) || {}).kind || '', planned: len, actual, hour: Math.floor(toMin(b.start) / 60), done: true, date: blockDate(b) }];
+      }
+      commit(s2, '사용 기록 예시를 채웠어요');
+      openLedger();
+    }
+  };
+}
+const BUDGET_LINE = b => Object.entries(b).map(([k, v]) => `<span class="pill" style="border-color:${CAT_COLORS[k]};color:${CAT_COLORS[k]}">${k} ${v}%</span>`).join(' ');
+const logTitle = l => l.taskId === 'rest' ? '휴식' : ((taskOf(state, l.taskId) || habitOf(state, l.taskId) || {}).title || l.course || '기록');
+
+// 계획과 연결된 통학 경로 (시연)
+function openRoute() {
+  const firstToday = state.classes.filter(c => c.day === today).sort((a, b) => toMin(a.start) - toMin(b.start))[0];
+  const day = firstToday && toMin(firstToday.start) > nowMin() + 30 ? today : Math.min(6, today + 1);
+  const r = routeOptions(state, sched, now, day);
+  const body = openModal(`
+    <h2>통학 경로 AI <span class="pill">시연 데이터</span></h2>
+    <div class="muted">길 안내가 아니라 <b>계획과 연결된 경로</b>를 골라요: 수업에 늦지 않으면서 이동 시간을 공부에 쓸 수 있는지까지 봅니다.</div>
+    <div class="why"><b>추천: ${esc(r.best.name)}</b>${r.best.depart ? ` · <b>${r.best.depart} 출발</b>` : ''}<ul>${r.why.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>
+    ${r.options.map(o => `<div class="route ${o.id === r.best.id ? 'best' : ''}"><div><b>${esc(o.name)}</b> <small>${o.min}분 + 도보 ${o.walk}분 · 환승 ${o.transfers}회 · ${esc(o.seat)}</small><div class="muted">${esc(o.note)}${o.studyMin ? ` · 이동 중 학습 ${o.studyMin}분` : ''}${o.depart ? ` · ${o.depart} 출발` : ''}</div></div><button class="small ${o.id === r.best.id ? '' : 'ghost'}" data-route="${o.id}">이 경로로</button></div>`).join('')}
+    <p class="muted" style="margin-top:12px">실제 서비스 연동: 카카오맵 대중교통·도보 경로 조회 API(2026년 7월 공개) + 서울시 지하철 실시간 도착정보. 경로 결과는 저장하지 않고 필요할 때마다 실시간으로 불러와요.</p>
+    <div class="acts"><button data-route="close">닫기</button></div>`);
+  body.onclick = e => {
+    const id = e.target.dataset.route;
+    if (!id) return;
+    if (id === 'close') { closeModal(); return; }
+    const o = r.options.find(x => x.id === id);
+    const s2 = clone(state);
+    const m = applyOp(s2, { type: 'set_commute', minutes: o.min + o.walk, mode: o.mode });
+    commit(s2, m);
+    closeModal();
+    addBot(`'${o.name}'로 바꿨어요. ${m}${o.studyMin ? `. 앉아서 가는 ${o.studyMin}분은 단어·강의 복습 같은 가벼운 과제로 채울게요` : ''}.`);
+  };
 }
 
 // 관심사(모듈)에 따라 화면 구성 바꾸기
@@ -228,10 +362,10 @@ function renderCalendar() {
       html += `<div class="ev commute" style="${pos(c.start < '07:00' ? '07:00' : c.start, c.end)}" title="${c.dir} · ${esc(s.prefs.commuteMode)} ${s.prefs.commuteMin}분"><span class="tm">${c.dir} · ${esc(s.prefs.commuteMode)}</span></div>`;
     }
     for (const c of s.classes.filter(x => x.day === d && vis(x))) {
-      html += `<div class="ev class" style="${pos(c.start, c.end)};border-left:3px solid ${colorFor(s, c.title)}"><span class="tt">${esc(c.title)}</span><span class="tm">${c.start}–${c.end}</span></div>`;
+      html += `<div class="ev class locked" style="${pos(c.start, c.end)};border-left:3px solid ${colorFor(s, c.title)}" title="고정 일정 · AI가 옮기지 않아요"><span class="tt">${esc(c.title)}</span><span class="tm">${c.start}–${c.end}</span></div>`;
     }
     for (const e of s.events.filter(x => x.day === d && vis(x))) {
-      html += `<div class="ev event k-${esc(e.kind || '기타')}" style="${pos(e.start, e.end)}" title="${esc(e.kind || '기타')}"><span class="tt">${esc(e.title)}</span><span class="tm">${e.start}–${e.end}</span></div>`;
+      html += `<div class="ev event locked k-${esc(e.kind || '기타')}" style="${pos(e.start, e.end)}" title="${esc(e.kind || '기타')} · 고정 일정 · AI가 옮기지 않아요"><span class="tt">${esc(e.title)}</span><span class="tm">${e.start}–${e.end}</span></div>`;
     }
     for (const b of ghosts.filter(x => x.day === d)) {
       const t = taskOf(state, b.taskId) || habitOf(state, b.taskId) || {};
@@ -241,7 +375,10 @@ function renderCalendar() {
       const h = habitOf(s, b.taskId) || {};
       html += `<div class="ev habit k-${esc(h.kind || '운동')} ${newKeys.has(b.id) ? 'new' : ''}" data-block="${b.id}" style="${pos(b.start, b.end)}" title="${esc(h.title)} · 주 ${h.perWeek}회 목표"><span class="tt">${esc(h.title)}</span><span class="tm">${b.start}–${b.end}</span></div>`;
     }
-    for (const b of p.filter(x => x.day === d && !x.habit)) {
+    for (const b of p.filter(x => x.day === d && x.rest)) {
+      html += `<div class="ev rest ${newKeys.has(b.id) ? 'new' : ''}" data-block="${b.id}" style="${pos(b.start, b.end)}" title="휴식 예산 · ${esc((b.why || []).join(', '))}"><span class="tt">휴식</span><span class="tm">${b.start}–${b.end}</span></div>`;
+    }
+    for (const b of p.filter(x => x.day === d && !x.habit && !x.rest)) {
       const t = taskOf(s, b.taskId) || {};
       const mob = b.mobile ? ' mobile' : '';
       const style = b.mobile ? `border-color:${colorFor(s, t.course)};color:${colorFor(s, t.course)}` : `background:${colorFor(s, t.course)}`;
@@ -320,7 +457,7 @@ function showPreview(draft, summary, applied, opts = {}) {
   }
   const r = schedule(draft, { weekStart, now });
   const diff = diffPlans(plan, r.plan, draft.tasks, draft.habits);
-  preview = { draft, plan: r.plan, commutes: r.commutes, today: r.today, warnings: r.warnings, diff };
+  preview = { draft, plan: r.plan, commutes: r.commutes, today: r.today, warnings: r.warnings, diff, sched: r };
   render();
   const el = document.createElement('div');
   el.className = 'preview';
@@ -403,6 +540,9 @@ function ruleBased(text) {
   if (r.special === 'recommend') { showRecsInChat(); return; }
   if (r.special === 'briefing') { openBriefing(); return; }
   if (r.special === 'report') { openReport(); return; }
+  if (r.special === 'ledger') { openLedger(); return; }
+  if (r.special === 'route') { openRoute(); return; }
+  if (r.special === 'suggest_budget') { const sg = suggestBudget(state, sched, now); const d = clone(state); const m = applyOp(d, { type: 'set_budget', ...sg.budget }); addBot(`이번 주는 이렇게 나눠볼게요.\n${sg.reasons.map(x => `· ${x}`).join('\n')}`); showPreview(d, '', [m]); return; }
   if (r.special === 'team') { openTeam(); return; }
   if (r.special === 'gaps') { explainGaps(); return; }
   if (r.special === 'explain') { explainFromChat(r.query); return; }
@@ -664,7 +804,7 @@ function bind() {
 
 // ======================= 에이전트·실행·협업 기능 =======================
 const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
-const blockTitle = b => (b.habit ? (habitOf(state, b.taskId) || {}).title : (taskOf(state, b.taskId) || {}).title) || '';
+const blockTitle = b => b.rest ? '휴식' : (b.habit ? (habitOf(state, b.taskId) || {}).title : (taskOf(state, b.taskId) || {}).title) || '';
 const blockDate = b => localDateKey(dateOfDay(weekStart, b.day));
 
 function openModal(html) {
@@ -718,6 +858,18 @@ function scheduleNotifs() {
 
 // 블록 시트: 배치 이유·집중 시작·완료/못 함·쪼개기·시작 도우미·제출 체크리스트
 function openBlockSheet(b) {
+  if (b.rest) {
+    const len = toMin(b.end) - toMin(b.start);
+    openModal(`<h2>휴식</h2><div class="muted">${DAY_NAMES[b.day]}요일 ${b.start}–${b.end} · ${len}분 · 휴식 예산 ${(state.prefs.budget || {})['휴식'] ?? 25}%</div>
+      <div class="why"><b>왜 이 시간에?</b> ${esc((b.why || []).join(', '))}</div>
+      <p class="muted">공부가 이 시간을 가져가지 못하게 잠가뒀어요. 쉬는 것도 계획의 일부예요.</p>
+      <div class="acts"><button class="ghost" data-r="skip">못 쉬었어요</button><button data-r="done">잘 쉬었어요</button></div>`).onclick = e => {
+      const a = e.target.dataset.r;
+      if (a === 'done') { closeModal(); logBlock(b, len, true); }
+      if (a === 'skip') { closeModal(); addBot('다음엔 휴식 블록을 지킬 수 있게 그 전 공부 블록을 조금 줄여볼게요. "휴식 30%로" 처럼 말하면 예산도 바꿀 수 있어요.'); }
+    };
+    return;
+  }
   const isHabit = !!b.habit;
   const t = isHabit ? habitOf(state, b.taskId) : taskOf(state, b.taskId);
   if (!t) return;
@@ -985,6 +1137,9 @@ function bindExtras() {
   });
   $('#btnBrief').addEventListener('click', () => openBriefing());
   $('#btnReport').addEventListener('click', openReport);
+  $('#btnLedger').addEventListener('click', openLedger);
+  $('#btnRoute').addEventListener('click', openRoute);
+  $('#ledgerStrip').addEventListener('click', e => { if (e.target.closest('[data-lg]')) openLedger(); });
   $('#btnTeam').addEventListener('click', openTeam);
   $('#btnDelay').addEventListener('click', () => {
     const d = clone(state);

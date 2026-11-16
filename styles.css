@@ -356,3 +356,50 @@ dialog::backdrop { background: rgba(15, 18, 30, .35); }
 .f-speed { display: block; margin-top: 14px; font-size: 12px; opacity: .6; }
 .auto-card { border: 1px solid #c8e6d4; background: #f0fbf5; border-radius: 12px; padding: 9px 12px; font-size: 12.5px; align-self: stretch; }
 .top-actions { flex-wrap: wrap; justify-content: flex-end; }
+
+/* ---- 시간 가계부 ---- */
+.ledger { display: flex; gap: 10px; align-items: stretch; padding: 8px 16px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.ledger:empty { display: none; }
+.ledger .lg-head { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; background: #111827; color: #fff; border: 0; border-radius: 10px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+.ledger .lg-head span { font-size: 11px; opacity: .8; }
+.lg-cat { flex: 1; min-width: 120px; cursor: pointer; padding: 4px 2px; }
+.lg-l { display: flex; align-items: baseline; gap: 4px; font-size: 12.5px; }
+.lg-l i { width: 8px; height: 8px; border-radius: 99px; display: inline-block; }
+.lg-l small { color: var(--muted); font-size: 11px; }
+.lg-l .sp, .lg-items .sp { flex: 1; }
+.lg-bar { position: relative; height: 7px; background: #eef0f4; border-radius: 99px; margin-top: 5px; overflow: hidden; }
+.lg-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; }
+.lg-bar i.pl { opacity: .28; }
+.lg-bar i.sp2 { opacity: 1; }
+.lg-top { display: flex; gap: 22px; align-items: center; margin: 14px 0 6px; flex-wrap: wrap; }
+.lg-donut { position: relative; width: 140px; height: 140px; }
+.lg-donut .c { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.lg-donut .c b { font-size: 20px; } .lg-donut .c small { color: var(--muted); font-size: 11px; }
+.lg-sum { display: grid; grid-template-columns: repeat(2, minmax(110px, 1fr)); gap: 8px 22px; }
+.lg-sum small { display: block; color: var(--muted); font-size: 11.5px; } .lg-sum b { font-size: 18px; }
+.lg-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+.lg-table th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px; padding: 4px; border-bottom: 1px solid var(--line); }
+.lg-table td { padding: 6px 4px; border-bottom: 1px solid #f1f2f5; }
+.lg-table td i { width: 9px; height: 9px; border-radius: 99px; display: inline-block; margin-right: 6px; }
+.lg-table input { width: 52px; padding: 3px 5px; }
+.lg-table td small { color: var(--muted); margin-left: 4px; }
+.lg-table td.bar { width: 28%; }
+.ai-sug { margin-top: 14px; background: #f5f7ff; border: 1px solid #dfe5fb; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+.ai-sug ul { margin: 6px 0 8px 18px; padding: 0; }
+.pill { display: inline-block; border: 1px solid var(--line); border-radius: 99px; padding: 0 8px; font-size: 11.5px; font-weight: 600; }
+.seg { display: flex; gap: 8px; flex-wrap: wrap; }
+.seg button { flex: 1; min-width: 150px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; background: #fff; color: var(--ink); border: 1px solid var(--line); text-align: left; }
+.seg button small { color: var(--muted); font-size: 11.5px; font-weight: 400; }
+.seg button.on { border-color: var(--accent); box-shadow: 0 0 0 2px #dfe5fb; }
+.lg-items { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+.lg-items li { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px dashed #eceef3; }
+.lg-items li i { width: 8px; height: 8px; border-radius: 99px; display: inline-block; }
+.ev.rest { background: repeating-linear-gradient(135deg, #fdf2f8 0 6px, #fce7f3 6px 12px); color: #9d174d; border: 1px solid #f9c8de; z-index: 2; }
+.sw.rest { background: #fce7f3; border: 1px solid #f9c8de; }
+.ev.locked::after { content: '고정'; position: absolute; right: 3px; top: 2px; font-size: 9px; font-weight: 700; color: #64748b; background: rgba(255,255,255,.75); border-radius: 4px; padding: 0 3px; }
+.ev.commute.locked::after { top: auto; bottom: 2px; }
+.route { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 13px; }
+.route small { color: var(--muted); }
+.route.best { border-color: var(--accent); background: #f7f9ff; }
+.seg button small { white-space: normal; line-height: 1.35; }
+.ev.locked .tt { padding-right: 24px; }

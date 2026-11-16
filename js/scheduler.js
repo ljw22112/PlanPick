@@ -68,6 +68,10 @@ export function conditionEffect(cond) {
   return { factor, blockCap: tired ? 60 : null, breakMin: tired ? 20 : 10, label };
 }
 
+// 남는 시간을 어떤 비율로 쓸지(시간 가계부의 '예산')
+export const DEFAULT_BUDGET = { 공부: 50, 운동: 15, 자기계발: 10, 휴식: 25 };
+export const BUDGET_CATS = ['공부', '운동', '자기계발', '휴식'];
+
 // ---------- 학습: 실제 소요시간 비율, 집중 잘 되는 시간대 ----------
 // log: [{ course, planned, actual, hour, done }]
 export function learnStats(log = []) {
@@ -172,6 +176,11 @@ export function schedule(state, { weekStart, now }) {
     moving.push(pastCut(mv, d).filter(([a, b]) => b - a >= 20));
   }
 
+  // 1-a) 남는 시간(고정 일정·통학을 뺀 공부 가능 시간) = 시간 예산의 기준
+  const baseMin = free.reduce((acc, iv) => acc + iv.reduce((x, [a, b]) => x + (b - a), 0), 0);
+  const budget = { ...DEFAULT_BUDGET, ...(p.budget || {}) };
+  const targetOf = cat => Math.round((baseMin * (budget[cat] || 0)) / 100);
+
   // 1-b) 운동 등 반복 목표: 주 N회를 남은 요일에 고르게(되도록 하루씩 띄워) 배치
   const plan = [];
   const warnings = [];
@@ -203,22 +212,60 @@ export function schedule(state, { weekStart, now }) {
     }
   }
 
-  // 2) 과제를 실질 마감(목표일과 실제 마감 중 이른 것) 순으로 정렬
+  // 1-c) 휴식 예산: 저녁 시간에 '쉬는 블록'을 먼저 확보해 공부가 잠식하지 못하게 보호
+  let restLeft = targetOf('휴식');
+  const restWin = [Math.max(toMin('19:00'), studyStart), studyEnd];
+  for (const perDay of [1, 2]) {
+    for (let d = Math.max(0, today); d < 7 && restLeft >= 30; d++) {
+      const placed = plan.filter(b => b.rest && b.day === d).length;
+      if (placed >= perDay) continue;
+      const i = free[d].findIndex(([a, b]) => Math.min(b, restWin[1]) - Math.max(a, restWin[0]) >= 60);
+      if (i < 0) continue;
+      const [a, b] = free[d][i];
+      const we = Math.min(b, restWin[1]);
+      const room = we - Math.max(a, restWin[0]);
+      const len = Math.max(30, Math.floor(Math.min(120, restLeft, room) / 30) * 30);
+      const s = we - len;
+      plan.push({ id: `b${++seq}`, taskId: 'rest', day: d, start: toHHMM(s), end: toHHMM(we), rest: true, why: [`휴식 예산 ${budget['휴식']}%`, '쉬는 시간도 계획에 넣어 번아웃 예방', '공부가 이 시간을 쓰지 못하게 보호'] });
+      restLeft -= len;
+      const rest = [];
+      if (s - 10 - a >= minBlock) rest.push([a, s - 10]);
+      if (b - we >= minBlock) rest.push([we, b]);
+      free[d].splice(i, 1, ...rest);
+    }
+  }
+
+  // 2) 과제를 실질 마감(목표일·여유 버퍼·실제 마감 중 가장 이른 것) 순으로 정렬
+  const bufferMode = p.buffer || 'normal';
   const tasks = state.tasks
     .filter(t => !t.done)
     .map(t => {
       const due = deadlinePos(weekStart, new Date(t.due));
       let eff = due;
+      let bufferH = 0;
+      // 여유 버퍼: 내 속도(실제 소요 비율)와 난이도를 보고 마감보다 일찍 끝나게 잡는다
+      const r = learned.ratio[t.course] || 1;
+      if (bufferMode === 'safe') bufferH = 24;
+      else if (bufferMode === 'normal' && (HARD_RE.test(t.title) || t.hours >= 4 || r > 1.1)) bufferH = 12;
+      if (bufferH) {
+        const ed = new Date(new Date(t.due).getTime() - bufferH * 3600000);
+        if (ed.getTime() - now.getTime() > 6 * 3600000) eff = deadlinePos(weekStart, ed);
+        else bufferH = 0;
+      }
       if (t.goalDay != null) {
         const goal = { day: t.goalDay, minute: 24 * 60 };
         if (goal.day < eff.day || (goal.day === eff.day && goal.minute < eff.minute)) eff = goal;
       }
-      return { t, eff, due };
+      return { t, eff, due, bufferH };
     })
     .sort((a, b) => a.eff.day - b.eff.day || a.eff.minute - b.eff.minute);
 
   const issues = [];
-  for (const { t, eff, due } of tasks) {
+  const catOf = t => (t.course === '대외활동' ? '자기계발' : '공부');
+  const usedCat = { 공부: 0, 자기계발: 0 };
+  const capCat = { 공부: targetOf('공부'), 자기계발: targetOf('자기계발') };
+  for (const { t, eff, due, bufferH } of tasks) {
+    const cat = catOf(t);
     const ratio = learned.ratio[t.course] || 1;
     let remaining = Math.max(0, Math.round((t.hours * 60 * ratio - (t.doneMin || 0)) / 10) * 10);
     if (remaining === 0) continue;
@@ -226,6 +273,7 @@ export function schedule(state, { weekStart, now }) {
     const dleft = due.day - Math.max(0, today);
     const baseWhy = [eff !== due ? `목표일 ${DAY_NAMES[eff.day] || ''}요일` : dleft <= 0 ? '오늘 마감' : `마감 D-${dleft}`];
     if (ratio !== 1) baseWhy.push(`실제 소요 ${ratio}배로 보정`);
+    if (bufferH) baseWhy.push(`여유 버퍼: 마감 ${bufferH}시간 전 완료 목표`);
     if (eff.day < 0) { warnings.push(`'${t.title}' 마감이 이미 지났어요.`); continue; }
     const lastDay = Math.min(6, eff.day);
 
@@ -257,7 +305,7 @@ export function schedule(state, { weekStart, now }) {
         while (remaining > 0 && i < free[d].length && perDay[d] < maxPerDay) {
           const [a, b] = free[d][i];
           const end = Math.min(b, limitEnd);
-          const room = Math.min(end - a, capOf(d) - used[d]);
+          const room = Math.min(end - a, capOf(d) - used[d], capCat[cat] - usedCat[cat]);
           let len = Math.min(blockOf(d), remaining, room);
           if (len < remaining) len = Math.floor(len / 30) * 30;
           if (len <= 0 || len < Math.min(minBlock, remaining)) { i++; continue; }
@@ -269,6 +317,7 @@ export function schedule(state, { weekStart, now }) {
           plan.push({ id: `b${++seq}`, taskId: t.id, day: d, start: toHHMM(a), end: toHHMM(a + len), why });
           remaining -= len;
           used[d] += len;
+          usedCat[cat] += len;
           perDay[d]++;
           const na = a + len + breakOf(d);
           if (b - na >= minBlock) free[d][i] = [na, b];
@@ -280,14 +329,26 @@ export function schedule(state, { weekStart, now }) {
     if (remaining > 0 && eff.day <= 6) {
       const h = (remaining / 60).toFixed(1).replace(/\.0$/, '');
       const why = t.goalDay != null && eff.day === t.goalDay ? '목표일 전까지' : '마감 전까지';
-      warnings.push(`'${t.title}' ${h}시간을 ${why} 배치하지 못했어요.`);
-      issues.push({ type: 'unplaced', taskId: t.id, minutes: remaining, goal: t.goalDay != null && eff.day === t.goalDay });
+      const overBudget = usedCat[cat] >= capCat[cat] - 30;
+      warnings.push(`'${t.title}' ${h}시간을 ${why} 배치하지 못했어요${overBudget ? ` (이번 주 ${cat} 예산 ${budget[cat]}%를 다 씀)` : ''}.`);
+      issues.push({ type: overBudget ? 'budget' : 'unplaced', cat, taskId: t.id, minutes: remaining, goal: t.goalDay != null && eff.day === t.goalDay });
     }
   }
 
   plan.sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start));
   const spareMin = free.reduce((acc, iv) => acc + iv.reduce((x, [a, b]) => x + (b - a), 0), 0);
-  return { plan, commutes, warnings, issues, spareMin, learned, today: { day: today, capMin: today >= 0 && today <= 6 ? capOf(today) : null, effect, recorded: !!cond } };
+  // 시간 가계부: 카테고리별 예산(목표)·계획
+  const len = b => toMin(b.end) - toMin(b.start);
+  const habitCat = id => { const h = (state.habits || []).find(x => x.id === id); return h && h.kind === '어학' ? '자기계발' : '운동'; };
+  const planned = { 공부: 0, 운동: 0, 자기계발: 0, 휴식: 0 };
+  for (const b of plan) {
+    if (b.rest) planned['휴식'] += len(b);
+    else if (b.habit) planned[habitCat(b.taskId)] += len(b);
+    else if (!b.mobile) { const t = state.tasks.find(x => x.id === b.taskId); planned[t ? catOf(t) : '공부'] += len(b); }
+  }
+  const mobileMin = plan.filter(b => b.mobile).reduce((a, b) => a + len(b), 0);
+  const ledger = { baseMin, budget, target: Object.fromEntries(Object.keys(planned).map(k => [k, targetOf(k)])), planned, mobileMin, spareMin };
+  return { plan, commutes, warnings, issues, spareMin, learned, ledger, today: { day: today, capMin: today >= 0 && today <= 6 ? capOf(today) : null, effect, recorded: !!cond } };
 }
 
 // 두 계획의 차이를 사람이 읽을 수 있게
@@ -297,7 +358,7 @@ export function diffPlans(oldPlan, newPlan, tasks, habits = []) {
   const newSet = new Set(newPlan.map(key));
   const added = newPlan.filter(b => !oldSet.has(key(b)));
   const removed = oldPlan.filter(b => !newSet.has(key(b)));
-  const title = id => (tasks.find(t => t.id === id) || habits.find(h => h.id === id) || {}).title || '과제';
+  const title = id => id === 'rest' ? '휴식' : (tasks.find(t => t.id === id) || habits.find(h => h.id === id) || {}).title || '과제';
   const lines = [];
   for (const b of removed.slice(0, 4)) lines.push(`− ${DAY_NAMES[b.day]} ${b.start}–${b.end} ${title(b.taskId)}`);
   for (const b of added.slice(0, 4)) lines.push(`+ ${DAY_NAMES[b.day]} ${b.start}–${b.end} ${title(b.taskId)}`);

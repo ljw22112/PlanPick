@@ -24,7 +24,7 @@ let idSeq = Date.now() % 100000;
 export const newId = prefix => `${prefix}${(++idSeq).toString(36)}`;
 
 export function defaultPrefs() {
-  return { studyStart: '09:00', studyEnd: '23:00', dailyMax: 4, blockMin: 90, commuteMin: 50, commuteMode: '지하철' };
+  return { studyStart: '09:00', studyEnd: '23:00', dailyMax: 4, blockMin: 90, commuteMin: 50, commuteMode: '지하철', budget: { 공부: 50, 운동: 15, 자기계발: 10, 휴식: 25 }, buffer: 'normal', home: '', school: '' };
 }
 
 export function localISO(d) {
@@ -258,11 +258,12 @@ export function applyOp(state, op) {
       // 실행 기록: 실제 소요시간을 남겨 다음 예측과 집중 시간대 학습에 쓴다
       const t = state.tasks.find(x => x.id === op.task_id);
       const h = (state.habits || []).find(x => x.id === op.task_id);
-      state.log = [...(state.log || []), { taskId: op.task_id, course: t ? t.course : h ? h.kind : '', planned: op.planned, actual: op.actual, hour: op.hour, done: !!op.done, date: op.date }];
+      state.log = [...(state.log || []), { taskId: op.task_id, course: t ? t.course : h ? h.kind : op.task_id === 'rest' ? '휴식' : '', planned: op.planned, actual: op.actual, hour: op.hour, done: !!op.done, date: op.date }];
       if (t && op.done) {
         t.doneMin = (t.doneMin || 0) + op.actual;
         if (op.finished) t.done = true;
       }
+      if (op.task_id === 'rest') return `휴식 ${op.actual}분 기록`;
       if (!op.done) return `'${(t || h || {}).title}' 이번 블록은 못 함 → 남은 시간에 다시 배치`;
       return `'${(t || h || {}).title}' ${op.actual}분 기록${op.finished ? ' · 과제 완료' : ''}`;
     }
@@ -270,6 +271,29 @@ export function applyOp(state, op) {
       const now = op.now ? new Date(op.now) : new Date();
       state.commuteDelay = { date: localDateKey(now), min: Math.max(0, Math.round(op.minutes || 0)) };
       return state.commuteDelay.min ? `오늘 통학 ${state.commuteDelay.min}분 지연 반영` : '통학 지연 해제';
+    }
+    case 'set_budget': {
+      // 남는 시간 비율(%) — 합이 100이 되도록 나머지를 비례 조정
+      const cats = ['공부', '운동', '자기계발', '휴식'];
+      const cur = { 공부: 50, 운동: 15, 자기계발: 10, 휴식: 25, ...(state.prefs.budget || {}) };
+      const fixed = {};
+      for (const c of cats) if (op[c] != null) fixed[c] = Math.max(0, Math.min(90, Math.round(Number(op[c]))));
+      if (!Object.keys(fixed).length) throw new Error('공부·운동·자기계발·휴식 중 하나 이상의 비율이 필요해요.');
+      const fixedSum = Object.values(fixed).reduce((a, b) => a + b, 0);
+      if (fixedSum > 100) throw new Error('비율 합이 100%를 넘어요.');
+      const rest = cats.filter(c => fixed[c] == null);
+      const restCur = rest.reduce((a, c) => a + cur[c], 0) || 1;
+      const out = { ...fixed };
+      let acc = fixedSum;
+      rest.forEach((c, i) => { out[c] = i === rest.length - 1 ? 100 - acc : Math.round(((100 - fixedSum) * cur[c]) / restCur); acc += i === rest.length - 1 ? 0 : out[c]; });
+      if (!rest.length && fixedSum !== 100) throw new Error('네 비율의 합이 100%가 되어야 해요.');
+      state.prefs.budget = out;
+      return `시간 예산: ${cats.map(c => `${c} ${out[c]}%`).join(' · ')}`;
+    }
+    case 'set_buffer': {
+      if (!['off', 'normal', 'safe'].includes(op.mode)) throw new Error('여유 모드는 off·normal·safe 중 하나예요.');
+      state.prefs.buffer = op.mode;
+      return `여유 모드: ${{ off: '빠듯하게(마감 맞춤)', normal: '보통(어려운 과제만 12시간 여유)', safe: '넉넉하게(모든 과제 하루 전 완료)' }[op.mode]}`;
     }
     case 'set_checklist': {
       const t = state.tasks.find(x => x.id === op.task_id);
@@ -304,6 +328,8 @@ export function summarizeForLLM(state, weekStart, now) {
     events: state.events,
     exams: state.exams || [],
     habits: state.habits || [],
+    time_budget_percent: state.prefs.budget,
+    buffer_mode: state.prefs.buffer || 'normal',
     interests: state.interests || [],
     blocked: state.blocked,
     tasks: state.tasks.map(({ id, title, course, due, hours, goalDay, done }) => ({ id, title, course, due, hours, goalDay, done })),
