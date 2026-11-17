@@ -470,3 +470,5 @@ body.simple-on { overflow: hidden; }
 .rt-rep { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; margin: 4px 0 6px; }
 .rt-form { display: flex; gap: 6px; } .rt-form input { flex: 1; } .rt-form select { width: auto; }
 #modal:has(.rt-cards) { width: min(880px, 96vw); max-width: 96vw; }
+.logo svg { width: 84%; height: 84%; display: block; }
+.logo { flex: 0 0 auto; }

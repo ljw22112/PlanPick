@@ -1,7 +1,7 @@
 {
-  "name": "플랜픽 · 대학생 시간 가계부",
+  "name": "플랜픽 · 통학길과 하루를 함께 짜는 AI",
   "short_name": "플랜픽",
-  "description": "고정 일정은 지키고 남는 시간을 예산처럼 쓰는 대학생 AI 플래너",
+  "description": "가장 빠른 길이 아니라, 오늘 나에게 맞는 길. 통학 변수를 읽고 길과 하루를 함께 다시 짜는 대학생 AI",
   "start_url": "./?src=pwa",
   "scope": "./",
   "display": "standalone",

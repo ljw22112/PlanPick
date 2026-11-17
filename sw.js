@@ -1,5 +1,5 @@
 // 오프라인에서도 열리도록 앱 파일을 캐시한다(데이터는 기기 localStorage에만 있음).
-const CACHE = 'planpick-v1';
+const CACHE = 'planpick-v2';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   "./js/agent.js",
@@ -15,7 +15,7 @@ const SHELL = [
   "./js/scheduler.js",
   "./js/share.js",
   "./js/state.js",
-  './icons/icon-192.png', './icons/icon-512.png',
+  './icons/icon-192.png', './icons/icon-512.png', './icons/favicon.svg', './js/commute.js',
 ];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
