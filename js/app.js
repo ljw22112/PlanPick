@@ -9,7 +9,8 @@ import { weeklyReport } from './report.js';
 import { SHIFT_PROMPT, extractWithLLM, startHelper } from './llm.js';
 import { parseICSEvents } from './ics.js';
 import { parseKorean } from './nlu.js';
-import { ledgerView, suggestBudget, routeOptions, CAT_COLORS } from './ledger.js';
+import { ledgerView, suggestBudget, CAT_COLORS } from './ledger.js';
+import { commuteCards, warnings as commuteWarnings, sampleReports } from './commute.js';
 import { runLLM, readTimetableImage } from './llm.js';
 import { parseICS, SAMPLE_ICS } from './ics.js';
 
@@ -317,27 +318,59 @@ const BUDGET_LINE = b => Object.entries(b).map(([k, v]) => `<span class="pill" s
 const logTitle = l => l.taskId === 'rest' ? '휴식' : ((taskOf(state, l.taskId) || habitOf(state, l.taskId) || {}).title || l.course || '기록');
 
 // 계획과 연결된 통학 경로 (시연)
-function openRoute() {
+let routeRain = false;
+function openRoute(dayArg) {
   const firstToday = state.classes.filter(c => c.day === today).sort((a, b) => toMin(a.start) - toMin(b.start))[0];
-  const day = firstToday && toMin(firstToday.start) > nowMin() + 30 ? today : Math.min(6, today + 1);
-  const r = routeOptions(state, sched, now, day);
+  const day = dayArg != null ? dayArg : (firstToday && toMin(firstToday.start) > nowMin() + 30 ? today : Math.min(6, today + 1));
+  if (!state.reports) { state.reports = sampleReports(now); save(); }
+  const r = commuteCards(state, { day, rain: routeRain, now });
+  const ws = commuteWarnings(state, { day, rain: routeRain, now });
+  const crowdCls = c => ['ok', 'mid', 'hi', 'full'][c];
   const body = openModal(`
-    <h2>통학 경로 AI <span class="pill">시연 데이터</span></h2>
-    <div class="muted">길 안내가 아니라 <b>계획과 연결된 경로</b>를 골라요: 수업에 늦지 않으면서 이동 시간을 공부에 쓸 수 있는지까지 봅니다.</div>
-    <div class="why"><b>추천: ${esc(r.best.name)}</b>${r.best.depart ? ` · <b>${r.best.depart} 출발</b>` : ''}<ul>${r.why.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>
-    ${r.options.map(o => `<div class="route ${o.id === r.best.id ? 'best' : ''}"><div><b>${esc(o.name)}</b> <small>${o.min}분 + 도보 ${o.walk}분 · 환승 ${o.transfers}회 · ${esc(o.seat)}</small><div class="muted">${esc(o.note)}${o.studyMin ? ` · 이동 중 학습 ${o.studyMin}분` : ''}${o.depart ? ` · ${o.depart} 출발` : ''}</div></div><button class="small ${o.id === r.best.id ? '' : 'ghost'}" data-route="${o.id}">이 경로로</button></div>`).join('')}
-    <p class="muted" style="margin-top:12px">실제 서비스 연동: 카카오맵 대중교통·도보 경로 조회 API(2026년 7월 공개) + 서울시 지하철 실시간 도착정보. 경로 결과는 저장하지 않고 필요할 때마다 실시간으로 불러와요.</p>
-    <div class="acts"><button data-route="close">닫기</button></div>`);
+    <h2>오늘의 통학길 <span class="pill">시연 데이터</span></h2>
+    <div class="muted">가장 빠른 길이 아니라, 오늘 나에게 맞는 길. 감수할 수 있는 범위는 사람마다 달라서 선택지를 나란히 보여드려요.</div>
+    <div class="rt-bar">
+      <div class="seg2">${[today, Math.min(6, today + 1)].filter((v, i, a) => a.indexOf(v) === i).map(d => `<button class="${d === day ? 'on' : ''}" data-day="${d}">${d === today ? '오늘' : '내일'} (${DAY_NAMES[d]})</button>`).join('')}</div>
+      <label class="rt-rain"><input type="checkbox" data-rain ${routeRain ? 'checked' : ''}/> 비 예보(시연)</label>
+      <span class="muted">${r.first ? `첫 수업 ${esc(r.first.title)} ${r.first.start} · 10분 전 도착 기준` : '이날은 수업이 없어요'}${r.tired ? ' · 피로도 높음' : ''}</span>
+    </div>
+    ${ws.length ? `<div class="rt-warns">${ws.map(w => `<div class="rw ${w.lv}">${esc(w.text)}</div>`).join('')}</div>` : ''}
+    <div class="rt-cards">${r.cards.map(c => `<div class="rc ${c.id === r.best.id ? 'best' : ''}">
+      ${c.id === r.best.id ? '<div class="rc-tag">AI 추천</div>' : ''}
+      <div class="rc-n">${esc(c.name)}</div><div class="rc-s">${esc(c.sub)}</div>
+      <div class="rc-t"><b>${c.depart}</b> 출발 → ${c.arrive} 도착</div>
+      <div class="rc-m">이동 ${c.ride}분 · 걷기 ${c.walk}분 <span class="cw ${crowdCls(c.crowd)}">${c.crowdLabel}</span></div>
+      <ul>${c.why.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+      <button class="small ${c.id === r.best.id ? '' : 'ghost'}" data-pick="${c.id}">이 길로</button></div>`).join('')}</div>
+    <h3>학생 제보 <span class="muted" style="font-weight:400">쌓일수록 혼잡 예측이 정확해져요</span></h3>
+    <div class="rt-rep">${(state.reports || []).slice(-5).reverse().map(x => `<div><span class="rk ${x.kind === '만차' ? 'full' : x.kind === '여유' ? 'ok' : 'mid'}">${esc(x.kind)}</span>${esc(x.time)} · ${esc(x.text)}${x.fake ? ' <small>(가상)</small>' : ''}</div>`).join('')}</div>
+    <form class="rt-form" data-rep><select name="kind"><option>만차</option><option>여유</option><option>요령</option></select><input name="text" placeholder="예: 지금 721번 만차" required /><button class="small">제보</button></form>
+    <p class="muted" style="margin-top:10px;font-size:12px">혼잡은 대학가 수업 시작 시각 분포로 예측한 시연값이에요. 실제 서비스: 서울시 지하철 실시간 도착정보·역별 승하차 공공데이터 + 학생 제보, 버스·환승은 카카오맵 대중교통 경로 API.</p>
+    <div class="acts"><button data-close>닫기</button></div>`);
   body.onclick = e => {
-    const id = e.target.dataset.route;
+    const el = e.target;
+    if (el.dataset.close != null) { closeModal(); return; }
+    if (el.dataset.day != null) { openRoute(Number(el.dataset.day)); return; }
+    if (el.dataset.rain != null) { routeRain = el.checked; openRoute(day); return; }
+    const id = el.dataset.pick;
     if (!id) return;
-    if (id === 'close') { closeModal(); return; }
-    const o = r.options.find(x => x.id === id);
+    const c = r.cards.find(x => x.id === id);
     const s2 = clone(state);
-    const m = applyOp(s2, { type: 'set_commute', minutes: o.min + o.walk, mode: o.mode });
+    const mode = state.prefs.commuteMode === '자차' ? '지하철' : state.prefs.commuteMode;
+    if (!s2.prefs.rideMin) s2.prefs.rideMin = Number(state.prefs.commuteMin) || 50; // 기준 이동 시간은 따로 보관
+    const m = applyOp(s2, { type: 'set_commute', minutes: c.total + (routeRain ? 10 : 0), mode });
     commit(s2, m);
     closeModal();
-    addBot(`'${o.name}'로 바꿨어요. ${m}${o.studyMin ? `. 앉아서 가는 ${o.studyMin}분은 단어·강의 복습 같은 가벼운 과제로 채울게요` : ''}.`);
+    addBot(`${DAY_NAMES[day]}요일은 '${c.name}'로 갈게요: ${c.depart} 출발 → ${c.arrive} 도착 (${c.crowdLabel} 예상). 통학 구간을 ${c.total + (routeRain ? 10 : 0)}분으로 맞춰 계획을 다시 짰어요.${c.id === 'relaxed' ? ' 도착 후 20분은 가벼운 준비 시간으로 쓰세요.' : ''}`);
+  };
+  body.querySelector('[data-rep]').onsubmit = e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const d = new Date();
+    const s2 = clone(state);
+    s2.reports = [...(s2.reports || []), { id: newId(), date: localDateKey(d), time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`, kind: f.get('kind'), text: String(f.get('text')).slice(0, 60) }];
+    commit(s2, '제보 고마워요 · 혼잡 예측에 반영했어요');
+    openRoute(day);
   };
 }
 
@@ -625,7 +658,7 @@ function ruleBased(text) {
   if (r.special === 'briefing') { openBriefing(); return; }
   if (r.special === 'report') { openReport(); return; }
   if (r.special === 'ledger') { openLedger(); return; }
-  if (r.special === 'route') { openRoute(); return; }
+  if (r.special === 'route') { if (r.rain) routeRain = true; openRoute(); return; }
   if (r.special === 'transit') { transitReplan(r.minutes, r.line, '대화로 알려줌'); return; }
   if (r.special === 'suggest_budget') { const sg = suggestBudget(state, sched, now); const d = clone(state); const m = applyOp(d, { type: 'set_budget', ...sg.budget }); addBot(`이번 주는 이렇게 나눠볼게요.\n${sg.reasons.map(x => `· ${x}`).join('\n')}`); showPreview(d, '', [m]); return; }
   if (r.special === 'team') { openTeam(); return; }
@@ -1263,7 +1296,8 @@ function bindExtras() {
   $('#btnBrief').addEventListener('click', () => openBriefing());
   $('#btnReport').addEventListener('click', openReport);
   $('#btnLedger').addEventListener('click', openLedger);
-  $('#btnRoute').addEventListener('click', openRoute);
+  $('#btnRoute').addEventListener('click', () => openRoute());
+  $('#btnRoute2').addEventListener('click', () => openRoute());
   $('#ledgerStrip').addEventListener('click', e => { if (e.target.closest('[data-lg]')) openLedger(); });
   $('#btnTeam').addEventListener('click', openTeam);
   $('#btnDelay').addEventListener('click', () => {

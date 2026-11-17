@@ -446,3 +446,27 @@ body.simple-on { overflow: hidden; }
 .tr-row s { color: var(--muted); }
 .tr-warn { margin-top: 5px; font-size: 12.5px; color: #b45309; background: #fef3c7; border-radius: 6px; padding: 4px 8px; }
 .ev.commute.delayed { border-color: #f59e0b; background: repeating-linear-gradient(90deg, #fde68a 0 4px, #fef3c7 4px 8px); }
+/* ---- 오늘의 통학길 ---- */
+.rt-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0 6px; font-size: 13px; }
+.seg2 { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg2 button { border: 0; border-radius: 0; background: #fff; color: var(--ink); padding: 5px 12px; font-size: 13px; }
+.seg2 button.on { background: var(--accent); color: #fff; }
+.rt-rain { display: flex; gap: 5px; align-items: center; }
+.rt-warns { display: flex; flex-direction: column; gap: 5px; margin: 6px 0; }
+.rw { font-size: 12.5px; padding: 6px 10px; border-radius: 8px; background: #f1f5f9; }
+.rw.bad { background: #fee2e2; color: #991b1b; } .rw.warn { background: #fef3c7; color: #92400e; } .rw.ok { background: #ecfdf5; color: #065f46; }
+.rt-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0 4px; }
+@media (max-width: 700px) { .rt-cards { grid-template-columns: 1fr; } }
+.rc { position: relative; border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; }
+.rc.best { border-color: var(--accent); box-shadow: 0 0 0 2px #dfe5fb; }
+.rc-tag { position: absolute; top: -9px; left: 10px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; border-radius: 99px; padding: 1px 8px; }
+.rc-n { font-weight: 800; font-size: 15px; } .rc-s { color: var(--muted); }
+.rc-t { font-size: 14px; margin-top: 4px; } .rc-m { color: var(--muted); }
+.rc ul { margin: 2px 0 6px 16px; padding: 0; } .rc button { margin-top: auto; }
+.cw, .rk { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 99px; padding: 0 7px; margin-left: 4px; }
+.cw.ok, .rk.ok { background: #dcfce7; color: #166534; } .cw.mid, .rk.mid { background: #fef3c7; color: #92400e; }
+.cw.hi { background: #fed7aa; color: #9a3412; } .cw.full, .rk.full { background: #fecaca; color: #991b1b; }
+.rk { margin: 0 6px 0 0; }
+.rt-rep { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; margin: 4px 0 6px; }
+.rt-form { display: flex; gap: 6px; } .rt-form input { flex: 1; } .rt-form select { width: auto; }
+#modal:has(.rt-cards) { width: min(880px, 96vw); max-width: 96vw; }

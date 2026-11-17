@@ -89,7 +89,7 @@ export function parseKorean(text, state, today) {
   if (/공강/.test(t)) return { special: 'gaps' };
   if (/가계부|시간 ?예산|예산 ?(보여|확인)|얼마나 ?썼/.test(t) && !/%|퍼센트/.test(t) && !/추천|제안/.test(t)) return { special: 'ledger' };
   if (/(비율|예산).*(추천|제안|짜줘|정해줘)|(추천|제안).*(비율|예산)/.test(t)) return { special: 'suggest_budget' };
-  if (/경로|출발 ?시간|몇 ?시에 ?나가|어떻게 ?가/.test(t) && !/만약/.test(t)) return { special: 'route' };
+  if (/경로|통학길|막차|출발 ?시간|몇 ?시에 ?나가|어떻게 ?가|비 ?(와|온|오는)|붐비/.test(t) && !/만약/.test(t) && !/(지하철|버스|전철|호선|열차).*(지연|늦|밀려)/.test(t)) return { special: 'route', rain: /비 ?(와|온|오는)/.test(t) };
   {
     const op = { type: 'set_budget' };
     const al = { 공부: '공부', 운동: '운동', 자기계발: '자기계발', 성장: '자기계발', 어학: '자기계발', 휴식: '휴식', 놀기: '휴식', 쉬는: '휴식', 여가: '휴식' };
