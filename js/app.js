@@ -443,7 +443,7 @@ function renderCalendar() {
       html += `<div class="ev blocked" style="${pos(b.start < '07:00' ? '07:00' : b.start, b.end)}" title="${esc(b.reason)}"><span class="tt">${esc(b.reason)}</span></div>`;
     }
     for (const c of cm.filter(x => x.day === d && vis(x))) {
-      html += `<div class="ev commute" style="${pos(c.start < '07:00' ? '07:00' : c.start, c.end)}" title="${c.dir} · ${esc(s.prefs.commuteMode)} ${s.prefs.commuteMin}분"><span class="tm">${c.dir} · ${esc(s.prefs.commuteMode)}</span></div>`;
+      html += `<div class="ev commute${c.delay ? ' delayed' : ''}" style="${pos(c.start < '07:00' ? '07:00' : c.start, c.end)}" title="${c.dir} · ${esc(s.prefs.commuteMode)} ${s.prefs.commuteMin}분${c.delay ? ` · ${c.delay}분 지연` : ''}"><span class="tm">${c.dir} · ${esc(s.prefs.commuteMode)}${c.delay ? ` +${c.delay}분` : ''}</span></div>`;
     }
     for (const c of s.classes.filter(x => x.day === d && vis(x))) {
       html += `<div class="ev class locked" style="${pos(c.start, c.end)};border-left:3px solid ${colorFor(s, c.title)}" title="고정 일정 · AI가 옮기지 않아요"><span class="tt">${esc(c.title)}</span><span class="tm">${c.start}–${c.end}</span></div>`;
@@ -626,6 +626,7 @@ function ruleBased(text) {
   if (r.special === 'report') { openReport(); return; }
   if (r.special === 'ledger') { openLedger(); return; }
   if (r.special === 'route') { openRoute(); return; }
+  if (r.special === 'transit') { transitReplan(r.minutes, r.line, '대화로 알려줌'); return; }
   if (r.special === 'suggest_budget') { const sg = suggestBudget(state, sched, now); const d = clone(state); const m = applyOp(d, { type: 'set_budget', ...sg.budget }); addBot(`이번 주는 이렇게 나눠볼게요.\n${sg.reasons.map(x => `· ${x}`).join('\n')}`); showPreview(d, '', [m]); return; }
   if (r.special === 'team') { openTeam(); return; }
   if (r.special === 'gaps') { explainGaps(); return; }
@@ -1199,6 +1200,46 @@ function explainFromChat(q) {
   addBot(explainBlock(state, b));
 }
 
+// 교통 변수 재설계: 실시간 지연이 감지되면 출발 알림이 아니라 오늘 남은 일정 전체를 다시 짠다
+function transitReplan(minutes, line, source = '실시간 교통 정보(시연)') {
+  const t0 = new Date();
+  const before = plan;
+  const beforeCm = commutes.filter(c => c.day === today);
+  const d = clone(state);
+  applyOp(d, { type: 'set_commute_delay', minutes, line, now: t0 });
+  undoStack.push(clone(state));
+  state = d;
+  app.demo = false;
+  recompute();
+  const cm = commutes.filter(c => c.day === today && c.delay);
+  const leg = cm[0];
+  const orig = leg ? beforeCm.find(c => c.dir === leg.dir) : null;
+  const m = t0.getHours() * 60 + t0.getMinutes();
+  const todayB = before.filter(b => b.day === today && toMin(b.end) > m);
+  const todayA = plan.filter(b => b.day === today && toMin(b.end) > m);
+  const key = b => `${b.taskId}|${b.start}|${b.end}`;
+  const moved = todayB.filter(b => !todayA.some(x => key(x) === key(b)));
+  const added = todayA.filter(b => !todayB.some(x => key(x) === key(b)));
+  const kept = todayA.length - added.length;
+  const late = (sched.issues || []).find(i => i.type === 'late');
+  const fixedLeft = [...state.classes, ...state.events].filter(x => x.day === today && toMin(x.end) > m).length;
+  const el = document.createElement('div');
+  el.className = 'auto-card transit';
+  el.innerHTML = `<div class="tr-h"><span class="tr-badge">교통 변수 감지</span>${esc(line)} ${minutes}분 지연 <small>${esc(source)}</small></div>
+    ${leg && orig ? `<div class="tr-row">${leg.dir} 도착 <s>${orig.end}</s> → <b>${leg.end}</b></div>` : ''}
+    ${late ? `<div class="tr-warn">'${esc(late.title)}' ${late.start} 수업에 약 ${late.minutes}분 늦을 수 있어요. 수업은 고정이라 옮기지 않았어요.</div>` : ''}
+    <div class="tr-row"><b>오늘 남은 일정 재설계</b> · 바뀜 ${added.length}개 · 그대로 ${kept}개 · 고정 일정 ${fixedLeft}개 유지</div>
+    <ul class="ops">${moved.map(b => `<li>− ${b.start}–${b.end} ${esc(blockTitle(b))}</li>`).join('')}${added.map(b => `<li>+ ${b.start}–${b.end} ${esc(blockTitle(b))}${b.mobile ? ' (이동 중)' : ''}</li>`).join('') || '<li>밀린 블록 없이 이동 시간만 늘었어요</li>'}</ul>
+    <button class="small ghost" data-undo>되돌리기</button>`;
+  el.querySelector('[data-undo]').onclick = e => { e.target.disabled = true; undo(); };
+  $('#messages').appendChild(el);
+  $('#messages').scrollTop = 1e9;
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try { new Notification('플랜픽 · 교통 변수 재설계', { body: `${line} ${minutes}분 지연 → 오늘 남은 일정 ${added.length}개를 다시 짰어요` }); } catch { /* 무시 */ }
+  }
+  toast(`${line} ${minutes}분 지연 → 오늘 일정 재설계`);
+}
+
 function bindExtras() {
   $('#nowCard').addEventListener('click', async e => {
     const a = e.target.dataset.now;
@@ -1226,10 +1267,14 @@ function bindExtras() {
   $('#ledgerStrip').addEventListener('click', e => { if (e.target.closest('[data-lg]')) openLedger(); });
   $('#btnTeam').addEventListener('click', openTeam);
   $('#btnDelay').addEventListener('click', () => {
-    const d = clone(state);
-    const cur = d.commuteDelay && d.commuteDelay.date === localDateKey(now) ? d.commuteDelay.min : 0;
-    commit(d, applyOp(d, { type: 'set_commute_delay', minutes: cur ? 0 : 15, now }));
-    addBot(cur ? '지연이 풀려 통학 시간을 원래대로 돌렸어요.' : '지하철이 15분 지연돼 오늘 통학 구간을 늘리고, 늘어난 시간에 이동 중 학습을 더 넣었어요. (실시간 교통 연동 시연)');
+    const cur = state.commuteDelay && state.commuteDelay.date === localDateKey(new Date()) && state.commuteDelay.min;
+    if (cur) {
+      const d = clone(state);
+      commit(d, applyOp(d, { type: 'set_commute_delay', minutes: 0 }));
+      addBot('지연이 풀려 통학 시간을 원래대로 돌렸어요.');
+      return;
+    }
+    transitReplan(15, '2호선');
   });
   $('#examForm').addEventListener('submit', e => {
     e.preventDefault();

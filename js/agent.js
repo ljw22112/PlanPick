@@ -78,7 +78,7 @@ export function explainBlock(state, b) {
 // 배치 못 한 과제가 있을 때 고를 수 있는 선택지
 export function feasibilityOptions(state, sched) {
   const opts = [];
-  const iss = sched.issues || [];
+  const iss = (sched.issues || []).filter(i => i.type !== 'late');
   if (!iss.length) return opts;
   if (state.prefs.dailyMax < 8) opts.push({ label: `하루 최대 ${state.prefs.dailyMax + 1}시간으로 늘리기`, ops: [{ type: 'set_preferences', daily_max_hours: state.prefs.dailyMax + 1 }] });
   const goalIss = iss.find(i => i.goal);

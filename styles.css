@@ -438,3 +438,11 @@ body.simple-on { overflow: hidden; }
 .sm-hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 14px; }
 .sm-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #111827; color: #fff; padding: 9px 16px; border-radius: 99px; font-size: 13px; z-index: 50; }
 .focus { z-index: 60; }
+.auto-card.transit { border-color: #f59e0b; background: #fffbeb; }
+.tr-h { font-weight: 700; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tr-h small { font-weight: 400; color: var(--muted); }
+.tr-badge { background: #f59e0b; color: #fff; border-radius: 99px; padding: 1px 8px; font-size: 11px; }
+.tr-row { margin-top: 5px; font-size: 13px; }
+.tr-row s { color: var(--muted); }
+.tr-warn { margin-top: 5px; font-size: 12.5px; color: #b45309; background: #fef3c7; border-radius: 6px; padding: 4px 8px; }
+.ev.commute.delayed { border-color: #f59e0b; background: repeating-linear-gradient(90deg, #fde68a 0 4px, #fef3c7 4px 8px); }

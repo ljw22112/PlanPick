@@ -133,17 +133,23 @@ export function schedule(state, { weekStart, now }) {
   // 통학 구간: 수업이 있는 날, 첫 수업 전·마지막 수업 후
   const commuteMin = Number(p.commuteMin) || 0;
   const commutes = [];
+  const transitIssues = [];
   if (commuteMin > 0) {
     for (let d = 0; d < 7; d++) {
       const cs = state.classes.filter(c => c.day === d).sort((a, b) => toMin(a.start) - toMin(b.start));
       if (!cs.length) continue;
       const first = toMin(cs[0].start);
       const last = Math.max(...cs.map(c => toMin(c.end)));
-      // 오늘 지하철·버스 지연(실시간 교통 연동 자리) → 통학 구간이 늘어난다
-      const delay = d === today && state.commuteDelay && state.commuteDelay.date === todayKey ? state.commuteDelay.min : 0;
-      const len = commuteMin + delay;
-      commutes.push({ day: d, start: toHHMM(Math.max(0, first - 10 - len)), end: toHHMM(first - 10), dir: '등교', delay });
-      commutes.push({ day: d, start: toHHMM(last + 10), end: toHHMM(Math.min(24 * 60, last + 10 + len)), dir: '하교', delay });
+      // 교통 변수: 오늘 이동 중 지연이 감지되면 그 구간의 '도착'이 늦어진다(출발은 이미 했으므로 그대로)
+      const cd = d === today && state.commuteDelay && state.commuteDelay.date === todayKey && state.commuteDelay.min ? state.commuteDelay : null;
+      const at = cd ? (cd.at != null ? cd.at : nowPos.minute) : 0;
+      const leg = cd ? (at < first ? '등교' : '하교') : null;
+      const dIn = leg === '등교' ? cd.min : 0;
+      const dOut = leg === '하교' ? cd.min : 0;
+      const inEnd = first - 10 + dIn;
+      commutes.push({ day: d, start: toHHMM(Math.max(0, first - 10 - commuteMin)), end: toHHMM(inEnd), dir: '등교', delay: dIn, line: cd && cd.line });
+      commutes.push({ day: d, start: toHHMM(last + 10), end: toHHMM(Math.min(24 * 60, last + 10 + commuteMin + dOut)), dir: '하교', delay: dOut, line: cd && cd.line });
+      if (dIn && inEnd > first) transitIssues.push({ type: 'late', title: cs[0].title, minutes: inEnd - first, start: cs[0].start });
     }
   }
 
@@ -184,6 +190,7 @@ export function schedule(state, { weekStart, now }) {
   // 1-b) 운동 등 반복 목표: 주 N회를 남은 요일에 고르게(되도록 하루씩 띄워) 배치
   const plan = [];
   const warnings = [];
+  for (const ti of transitIssues) warnings.push(`교통 지연으로 '${ti.title}'(${ti.start}) 수업에 약 ${ti.minutes}분 늦을 수 있어요. 수업은 고정이라 옮기지 않았어요.`);
   let seq = 0;
   for (const h of state.habits || []) {
     const ws = toMin(h.windowStart);
@@ -260,7 +267,7 @@ export function schedule(state, { weekStart, now }) {
     })
     .sort((a, b) => a.eff.day - b.eff.day || a.eff.minute - b.eff.minute);
 
-  const issues = [];
+  const issues = [...transitIssues];
   const catOf = t => (t.course === '대외활동' ? '자기계발' : '공부');
   const usedCat = { 공부: 0, 자기계발: 0 };
   const capCat = { 공부: targetOf('공부'), 자기계발: targetOf('자기계발') };

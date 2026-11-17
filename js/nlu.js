@@ -102,9 +102,10 @@ export function parseKorean(text, state, today) {
   if (why && /왜|이유/.test(t)) return { special: 'explain', query: why[1].replace(/[은는이가을를]\s*$/, '').trim() };
 
   // 지하철·버스 지연 (실시간 교통 연동 자리)
-  if (/(지하철|버스|전철).*(지연|늦|밀려)/.test(t)) {
+  if (/(지하철|버스|전철|호선|열차|기차).*(지연|늦|밀려)/.test(t)) {
     const m = t.match(/(\d+)\s*분/);
-    return { ops: [{ type: 'set_commute_delay', minutes: m ? Number(m[1]) : 15 }] };
+    const ln = t.match(/(\d+호선|신분당선|경의중앙선|수인분당선|공항철도|\d+번 ?버스)/);
+    return { special: 'transit', minutes: m ? Number(m[1]) : 15, line: ln ? ln[1] : (/버스/.test(t) ? '버스' : '지하철') };
   }
 
   // 시험기간 모드: "확률통계 시험 11월 20일", "운영체제 기말 12/16 10시간"

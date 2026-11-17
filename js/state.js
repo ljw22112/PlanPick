@@ -269,8 +269,9 @@ export function applyOp(state, op) {
     }
     case 'set_commute_delay': {
       const now = op.now ? new Date(op.now) : new Date();
-      state.commuteDelay = { date: localDateKey(now), min: Math.max(0, Math.round(op.minutes || 0)) };
-      return state.commuteDelay.min ? `오늘 통학 ${state.commuteDelay.min}분 지연 반영` : '통학 지연 해제';
+      const at = op.at != null ? op.at : now.getHours() * 60 + now.getMinutes();
+      state.commuteDelay = { date: localDateKey(now), min: Math.max(0, Math.round(op.minutes || 0)), at, line: op.line || '' };
+      return state.commuteDelay.min ? `${op.line ? op.line + ' ' : ''}${state.commuteDelay.min}분 지연 반영 → 오늘 남은 일정 재설계` : '통학 지연 해제';
     }
     case 'set_budget': {
       // 남는 시간 비율(%) — 합이 100이 되도록 나머지를 비례 조정
